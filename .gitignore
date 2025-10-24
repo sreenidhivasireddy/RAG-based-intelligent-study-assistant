@@ -1,0 +1,96 @@
+# Byte-compiled / optimized / DLLs
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+dist/
+downloads/
+eggs/
+.eggs/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments and local env files
+.env
+.env.*
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# VS Code / IDE settings
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# macOS
+.DS_Store
+
+# Logs and databases
+*.log
+*.sqlite3
+*..db
+
+# pytest / coverage
+.pytest_cache/
+.coverage
+coverage.xml
+
+# mypy
+.mypy_cache/
+
+# pip / packaging metadata
+pip-wheel-metadata/
+__pypackages__/
+
+# Node
+node_modules/
+
+# Secrets / keys
+secrets.yml
+*.pem
+*.key
+*.crt
+
+# Common config folders to ignore
+config/
+configs/
+conf/
+configuration/
+
+# Elasticsearch / Kibana extracted directories (e.g. elasticsearch-9.2.0/)
+elasticsearch*/
+kibana*/
+
+# Local overrides
+*.env.local
+local_settings.py
+
+# Kubernetes / Terraform / cloud SDK configs
+.kube/
+.kubeconfig
+.terraform/
+
+# Editor/IDE / misc
+.vagrant/
+nbproject/
+*.swo
+*.swp
+*~
+
+# Temporary files
+tmp/
+temp/
