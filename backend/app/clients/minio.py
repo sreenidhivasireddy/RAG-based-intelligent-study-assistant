@@ -1,0 +1,30 @@
+"""
+MinIO client initialization and configuration.
+This module provides a reusable MinIO client instance for interacting with object storage.
+"""
+
+from minio import Minio
+from dotenv import load_dotenv
+import os
+
+# Load environment variables from .env file
+load_dotenv()
+
+# Read configuration
+MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "localhost:9000")
+MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
+MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "minioadmin")
+MINIO_BUCKET = os.getenv("MINIO_BUCKET", "documents")
+MINIO_SECURE = os.getenv("MINIO_SECURE", "False").lower() == "true"
+
+# Initialize MinIO client
+minio_client = Minio(
+    MINIO_ENDPOINT,
+    access_key=MINIO_ACCESS_KEY,
+    secret_key=MINIO_SECRET_KEY,
+    secure=MINIO_SECURE,
+)
+
+# Automatically create the bucket if it doesn't exist
+if not minio_client.bucket_exists(MINIO_BUCKET):
+    minio_client.make_bucket(MINIO_BUCKET)
