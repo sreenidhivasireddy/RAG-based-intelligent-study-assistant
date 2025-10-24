@@ -1,0 +1,98 @@
+
+
+安装 minIO
+
+
+命令行
+
+curl -O https://dl.min.io/server/minio/release/darwin-amd64/minio
+chmod +x minio
+sudo mv minio /usr/local/bin/
+
+
+验证安装成功：
+
+minio --v
+
+
+安装完后，你可以用这行启动 MinIO 服务：
+
+minio server ~/minio-data --console-address ":9001"
+
+
+启动后：
+
+API 地址：http://localhost:9000
+
+控制台：http://localhost:9001
+
+默认账号密码：minioadmin / minioadmin
+
+
+
+打开浏览器访问 👉 http://localhost:9001
+
+输入默认账号密码：
+
+Username: minioadmin
+Password: minioadmin
+
+
+登录成功后，在左侧菜单点「Buckets」
+→ 点击右上角 Create Bucket
+→ 输入名称 documents
+→ 点击 Create Bucket
+
+测试文件 tests/test_minio.py
+
+
+版本不匹配
+
+python -m pip install "minio>=7.2.0"
+然后测试
+cd backend && python tests/test_minio.py
+
+
+(base) ➜  RAG-based-intelligent-study-assistant git:(main) ✗ cd backend && python tests/test_minio.py
+✅ Bucket exists: documents
+✅ File uploaded successfully!
+✅ File downloaded successfully!
+🎉 MinIO setup is working perfectly!
+
+刷新http://localhost:9001
+看到bucket成功添加一个test文件
+测试成功
+
+删除这个test.txt文件
+
+成功安装
+
+
+
+=============================================Redis
+
+安装 Redis
+macOS
+brew install redis
+brew services start redis
+
+
+验证是否启动成功：
+
+redis-cli ping
+
+
+输出：
+
+PONG
+
+✅ 表示连接成功。
+
+
+python -m pip install "redis>=5.0.1"
+
+(base) ➜  backend git:(main) ✗ python tests/test_redis.py
+✅ Redis connected successfully, value = hello redis
+
+
+
