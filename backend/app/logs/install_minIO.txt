@@ -96,3 +96,30 @@ python -m pip install "redis>=5.0.1"
 
 
 
+安装 Kafka（本地）
+自带 KRaft 模式（新版本推荐）。
+
+🐧 macOS（推荐 KRaft 单机模式）
+brew install kafka
+brew services start kafka
+
+export PATH="/opt/homebrew/opt/kafka/bin:$PATH"
+
+一步步设置 PATH
+🪄 第 1 步：打开 .zshrc 文件
+open -e ~/.zshrc
+
+在文件末尾添加这一行👇
+在 .zshrc 文件最后粘贴：
+export PATH="/opt/homebrew/opt/kafka/bin:$PATH"
+
+让配置生效
+回到你的终端，输入：
+source ~/.zshrc
+
+再验证命令可用性：
+
+kafka-topics --list --bootstrap-server localhost:9092
+
+
+

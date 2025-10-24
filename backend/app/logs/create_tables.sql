@@ -1,0 +1,41 @@
+-- ============================================================
+-- RAG Project - File Upload Module Table Definitions
+-- ============================================================
+
+-- ==============================
+-- 1. Table: file_upload
+-- ==============================
+USE rag;
+
+CREATE TABLE IF NOT EXISTS file_upload (
+  file_md5 VARCHAR(32) PRIMARY KEY COMMENT 'MD5 hash of the file, used as unique identifier',
+  file_name VARCHAR(255) NOT NULL COMMENT 'Original file name',
+  total_size BIGINT NOT NULL COMMENT 'Total file size in bytes',
+  status INT NOT NULL DEFAULT 0 COMMENT 'Upload status: 0 - uploading, 1 - completed',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT 'File upload creation timestamp',
+  merged_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'File merge completion timestamp'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='File upload metadata table';
+
+
+-- ==============================
+-- 2. Table: chunk_info
+-- ==============================
+CREATE TABLE IF NOT EXISTS chunk_info (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT 'Unique ID of the chunk record',
+  file_md5 VARCHAR(32) NOT NULL COMMENT 'Associated file MD5 hash',
+  chunk_index INT NOT NULL COMMENT 'Chunk index number',
+  chunk_md5 VARCHAR(32) NOT NULL COMMENT 'MD5 hash of the chunk',
+  storage_path VARCHAR(255) NOT NULL COMMENT 'Storage path in MinIO or file system'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='File chunk information table';
+
+
+-- ==============================
+-- 3. Table: document_vectors
+-- ==============================
+CREATE TABLE IF NOT EXISTS document_vectors (
+  vector_id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT 'Unique ID of the vector record',
+  file_md5 VARCHAR(32) NOT NULL COMMENT 'Associated file MD5 hash',
+  chunk_id INT NOT NULL COMMENT 'Text chunk sequence number',
+  text_content TEXT COMMENT 'Extracted text content',
+  model_version VARCHAR(32) COMMENT 'Version of the embedding model'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Document vector storage table';
