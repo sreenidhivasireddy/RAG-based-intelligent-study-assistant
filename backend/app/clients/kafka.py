@@ -1,32 +1,23 @@
 """
-Kafka producer client for sending asynchronous tasks to Kafka topics.
-Used to trigger document parsing and vectorization pipelines.
+Kafka client initialization.
+Provides a reusable producer instance for sending async messages.
 """
 
-from kafka import KafkaProducer
-import json
 import os
+from kafka import KafkaProducer
+from dotenv import load_dotenv
 
-# Load Kafka configuration
+# Load environment variables
+load_dotenv()
+
 KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
 
-# Initialize global Kafka producer
-producer = KafkaProducer(
-    bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
-    value_serializer=lambda v: json.dumps(v).encode("utf-8")
-)
-
-def send_message(topic: str, message: dict):
-    """
-    Send a JSON message to the specified Kafka topic.
-
-    Args:
-        topic (str): Kafka topic name
-        message (dict): Message payload
-    """
-    try:
-        producer.send(topic, message)
-        producer.flush()
-        print(f"✅ Kafka message sent to topic [{topic}]: {message}")
-    except Exception as e:
-        print(f"❌ Failed to send message to Kafka: {e}")
+try:
+    producer = KafkaProducer(
+        bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
+        value_serializer=lambda v: str(v).encode("utf-8")
+    )
+    print(f"✅ Connected to Kafka successfully ({KAFKA_BOOTSTRAP_SERVERS})")
+except Exception as e:
+    print(f"❌ Failed to connect to Kafka: {e}")
+    producer = None
