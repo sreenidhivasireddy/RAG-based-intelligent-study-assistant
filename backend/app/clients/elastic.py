@@ -7,8 +7,13 @@ import os
 from elasticsearch import Elasticsearch
 from dotenv import load_dotenv
 
+from app.utils.logging import get_logger
+
 # Load environment variables
 load_dotenv()
+
+# Initialize logger
+logger = get_logger(__name__)
 
 ES_HOST = os.getenv("ES_HOST", "localhost")
 ES_PORT = int(os.getenv("ES_PORT", 9200))
@@ -31,9 +36,9 @@ try:
 
     # Test connection
     if es_client.ping():
-        print(f"✅ Connected to Elasticsearch successfully ({ES_URL})")
+        logger.info(f"Connected to Elasticsearch successfully ({ES_URL})")
     else:
-        print(f"⚠️ Elasticsearch connection established, but ping failed ({ES_URL})")
+        logger.warning(f"Elasticsearch connection established, but ping failed ({ES_URL})")
 except Exception as e:
-    print(f"❌ Failed to connect to Elasticsearch: {e}")
+    logger.error(f"Failed to connect to Elasticsearch: {e}")
     es_client = None
