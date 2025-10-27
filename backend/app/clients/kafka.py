@@ -7,8 +7,13 @@ import os
 from kafka import KafkaProducer
 from dotenv import load_dotenv
 
+from app.utils.logging import get_logger
+
 # Load environment variables
 load_dotenv()
+
+# Initialize logger
+logger = get_logger(__name__)
 
 KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
 
@@ -17,7 +22,7 @@ try:
         bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
         value_serializer=lambda v: str(v).encode("utf-8")
     )
-    print(f"✅ Connected to Kafka successfully ({KAFKA_BOOTSTRAP_SERVERS})")
+    logger.info(f"Connected to Kafka successfully ({KAFKA_BOOTSTRAP_SERVERS})")
 except Exception as e:
-    print(f"❌ Failed to connect to Kafka: {e}")
+    logger.error(f"Failed to connect to Kafka: {e}")
     producer = None

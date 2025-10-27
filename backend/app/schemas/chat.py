@@ -1,1 +1,1 @@
-# 聊天相关DTO
+# Chat related DTOs

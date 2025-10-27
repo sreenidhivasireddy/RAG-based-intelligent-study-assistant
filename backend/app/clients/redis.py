@@ -12,8 +12,13 @@ import os
 import redis
 from dotenv import load_dotenv
 
+from app.utils.logging import get_logger
+
 # Load environment variables
 load_dotenv()
+
+# Initialize logger
+logger = get_logger(__name__)
 
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
@@ -29,7 +34,7 @@ try:
     )
     # Test connection
     redis_client.ping()
-    print(f"✅ Connected to Redis successfully ({REDIS_HOST}:{REDIS_PORT}, DB={REDIS_DB})")
+    logger.info(f"Connected to Redis successfully ({REDIS_HOST}:{REDIS_PORT}, DB={REDIS_DB})")
 except Exception as e:
-    print(f"❌ Failed to connect to Redis: {e}")
+    logger.error(f"Failed to connect to Redis: {e}")
     redis_client = None

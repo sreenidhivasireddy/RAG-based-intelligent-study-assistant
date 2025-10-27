@@ -1,1 +1,1 @@
-#  数据库和服务连接初始化
+# Database and service connection initialization

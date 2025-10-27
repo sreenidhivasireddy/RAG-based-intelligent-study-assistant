@@ -13,3 +13,5 @@ minio>=7.2.0
 websockets>=12.0
 kafka-python>=2.0.2
 python-dotenv>=1.0.0
+mysql-connector-python>=8.2.0
+requests>=2.31.0

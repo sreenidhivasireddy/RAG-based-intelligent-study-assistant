@@ -1,8 +1,8 @@
- #对应 SmartPaiApplication.java
+# Corresponds to SmartPaiApplication.java
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.core.config import Settings
+from app.api.upload import router as upload_router
 
 app = FastAPI(
     title="PaiSmart API",
@@ -10,7 +10,7 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# CORS设置
+# CORS settings
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -18,6 +18,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Include routers
+app.include_router(upload_router, prefix="/api/v1")
 
 @app.get("/")
 async def root():

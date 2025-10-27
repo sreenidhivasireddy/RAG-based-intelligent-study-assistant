@@ -16,8 +16,13 @@ import mysql.connector
 from mysql.connector import pooling
 from dotenv import load_dotenv
 
+from app.utils.logging import get_logger
+
 # Load environment variables
 load_dotenv()
+
+# Initialize logger
+logger = get_logger(__name__)
 
 MYSQL_HOST = os.getenv("MYSQL_HOST", "localhost")
 MYSQL_PORT = int(os.getenv("MYSQL_PORT", 3306))
@@ -37,9 +42,9 @@ try:
         password=MYSQL_PASSWORD,
         database=MYSQL_DATABASE,
     )
-    print(f"✅ MySQL connection pool created successfully ({MYSQL_HOST}:{MYSQL_PORT})")
+    logger.info(f"MySQL connection pool created successfully ({MYSQL_HOST}:{MYSQL_PORT})")
 except Exception as e:
-    print(f"❌ Failed to create MySQL connection pool: {e}")
+    logger.error(f"Failed to create MySQL connection pool: {e}")
     connection_pool = None
 
 
@@ -53,5 +58,5 @@ def get_connection():
     try:
         return connection_pool.get_connection()
     except Exception as e:
-        print(f"❌ Error getting MySQL connection: {e}")
+        logger.error(f"Error getting MySQL connection: {e}")
         raise
