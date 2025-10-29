@@ -15,6 +15,3 @@ class ChunkInfo(Base):
     chunk_index = Column(Integer, nullable=False)
     chunk_md5 = Column(String(32), nullable=False)
     storage_path = Column(String(255), nullable=False)
-
-
-# TODO: Add TextChunk model if needed for text processing
