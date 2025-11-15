@@ -12,8 +12,8 @@ from sqlalchemy.orm import Session
 from typing import Annotated
 
 from app.database import SessionLocal
-from app.schemas.upload import ChunkUploadRequest
-from app.services.upload import upload_chunk_service, calculate_upload_progress
+from app.schemas.upload import ChunkUploadRequest, FileMergeRequest, FileMergeResponse
+from app.services.upload import upload_chunk_service, calculate_upload_progress, merge_file_service
 from app.repositories.upload_repository import get_file_upload
 
 
@@ -229,3 +229,138 @@ def get_upload_status(
             "code": 500,
             "message": f"Failed to get upload status: {str(e)}"
         }
+
+
+@router.post("/merge")
+def merge_file(
+    request: FileMergeRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Merge all uploaded file chunks into a single complete file.
+    
+    **URL**: `/api/v1/upload/merge`  
+    **Method**: `POST`  
+    **Content-Type**: `application/json`
+    
+    **Request Body**:
+    ```json
+    {
+      "file_md5": "d41d8cd98f00b204e9800998ecf8427e",
+      "file_name": "annual-report.pdf"
+    }
+    ```
+    
+    **Response** (200 OK):
+    ```json
+    {
+      "code": 200,
+      "message": "File merged successfully",
+      "data": {
+        "object_url": "documents/d41d8cd98f00b204e9800998ecf8427e/annual-report.pdf",
+        "file_size": 15728640
+      }
+    }
+    ```
+    
+    **Response** (400 Bad Request - Missing chunks):
+    ```json
+    {
+      "code": 400,
+      "message": "Not all chunks have been uploaded. Missing chunks: [2, 5]. Upload progress: 8/10"
+    }
+    ```
+    
+    **Response** (400 Bad Request - File not found):
+    ```json
+    {
+      "code": 400,
+      "message": "File not found in database. Please upload chunks first."
+    }
+    ```
+    
+    **Business Logic Flow**:
+    
+    1. **Validate file exists** - Check MySQL `file_upload` table for file_md5
+       - Ensures this file was previously registered during chunk uploads
+       - Returns 400 if not found
+    
+    2. **Verify all chunks uploaded** - Check Redis bitmap for completion
+       - Redis key: `upload:{file_md5}:chunks`
+       - Each bit represents one chunk (0=missing, 1=uploaded)
+       - Returns 400 with missing chunk list if incomplete
+    
+    3. **Fetch chunk metadata** - Query MySQL `chunk_info` table
+       - Get storage_path for each chunk (e.g., `chunks/{md5}/{index}`)
+       - Order by chunk_index to ensure correct concatenation sequence
+    
+    4. **Download chunks from MinIO** - Retrieve binary data in order
+       - Loop through chunks sequentially (chunk0 → chunk1 → chunk2 → ...)
+       - Concatenate bytes in memory (suitable for files < 200MB)
+       - For larger files, consider streaming to temporary file
+    
+    5. **Upload merged file to permanent storage** - Store complete file
+       - Final path: `documents/{file_md5}/{file_name}`
+       - This separates temporary chunks from permanent storage
+       - Preserves original filename for proper downloads
+    
+    6. **Update file status in MySQL** - Mark as completed
+       - Set `file_upload.status = 1` (0=uploading, 1=completed)
+       - Update `merged_at` timestamp
+       - Enables client queries to check if file is ready
+    
+    7. **Publish Kafka event (optional)** - Trigger downstream processing
+       - Send message to parsing topic for PDF text extraction
+       - Enables async vector embedding and indexing
+       - Decouples upload from processing pipeline
+    
+    8. **Cleanup temporary chunks (optional)** - Free storage space
+       - Can delete chunk files after successful merge
+       - Or use background job with TTL policy (recommended)
+    
+    **Why This Design?**
+    
+    - **Redis bitmap**: O(1) chunk existence check, fast progress calculation
+    - **MySQL chunk_info**: Persistent metadata, enables crash recovery
+    - **MinIO separation**: Chunks in `/chunks`, final in `/documents`
+    - **Status tracking**: Clients can poll for completion before download
+    - **Kafka integration**: Async processing prevents blocking uploads
+    
+    **Use Cases**:
+    - Complete multi-part file upload workflow
+    - Reconstruct original file from chunks
+    - Trigger downstream parsing/indexing pipeline
+    - Enable file download after successful merge
+    """
+    try:
+        # Call service layer to perform merge
+        result = merge_file_service(
+            db=db,
+            file_md5=request.file_md5,
+            file_name=request.file_name
+        )
+        
+        # Return success response with file info
+        return {
+            "code": 200,
+            "message": "File merged successfully",
+            "data": result
+        }
+        
+    except Exception as e:
+        # Handle validation and merge errors
+        error_message = str(e)
+        
+        # Determine appropriate error code
+        if "not found" in error_message.lower():
+            code = 404
+        elif "not all chunks" in error_message.lower() or "missing" in error_message.lower():
+            code = 400
+        else:
+            code = 500
+        
+        return {
+            "code": code,
+            "message": error_message
+        }
+

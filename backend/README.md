@@ -88,17 +88,10 @@ A backend service for an intelligent study assistant powered by RAG (Retrieval-A
 
 ### Prerequisites
 
-**Python Environment:**
 - Python 3.8+
-
-**Required Services (must be installed and running):**
 - MySQL 5.7+
 - Redis 5.0+
 - MinIO (latest)
-
-**Optional Services:**
-- Elasticsearch 8.0+ (for search features)
-- Kafka (for async tasks)
 
 ### 1. Create and Activate Virtual Environment
 
@@ -153,11 +146,9 @@ ES_SCHEME=http
 KAFKA_BOOTSTRAP_SERVERS=localhost:9092
 ```
 
-### 3. Install and Start Required Services
+### 3. Start Required Services
 
-**Important**: These are separate server processes, not Python packages!
-
-#### MySQL (Required)
+#### MySQL
 ```bash
 # macOS (using Homebrew)
 brew install mysql
@@ -165,22 +156,20 @@ brew services start mysql
 
 # Create database
 mysql -u root -p -e "CREATE DATABASE IF NOT EXISTS rag;"
-
-# Verify: should show "rag" database
-mysql -u root -p -e "SHOW DATABASES;"
 ```
 
-#### Redis (Required)
+#### Redis
 ```bash
 # macOS (using Homebrew)
 brew install redis
 brew services start redis
 
-# Verify: should return "PONG"
-redis-cli ping
+# Ubuntu/Debian
+sudo apt-get install redis-server
+sudo systemctl start redis-server
 ```
 
-#### MinIO (Required)
+#### MinIO
 ```bash
 # macOS (using Homebrew)
 brew install minio/stable/minio
@@ -188,29 +177,11 @@ brew install minio/stable/minio
 # Start MinIO (keep this terminal open)
 minio server /data --console-address ":9001"
 
-# Access web console: http://localhost:9001
-# Default credentials: minioadmin / minioadmin
+# Or download binary
+wget https://dl.min.io/server/minio/release/darwin-amd64/minio
+chmod +x minio
+./minio server /data --console-address ":9001"
 ```
-
-#### Elasticsearch (Optional - for search features)
-```bash
-# If you have elasticsearch-9.2.0/ in your project:
-cd elasticsearch-9.2.0
-./bin/elasticsearch
-
-# Or install via Homebrew:
-brew install elasticsearch
-brew services start elasticsearch
-```
-
-**Quick Check**: Verify all services are running:
-```bash
-cd backend
-chmod +x check_services.sh
-./check_services.sh
-```
-
-This will show you which services are running and which need to be started.
 
 ### 4. Initialize Database
 
@@ -327,7 +298,7 @@ For manual testing with a visual interface:
 
 **Q: Why does the server seem "stuck" after starting?**  
 A: This is normal! Web servers run continuously. Open a new terminal to run tests.
-
+ 
 **Q: How do I stop the server?**  
 A: Press `Ctrl+C` in the terminal running the server.
 
