@@ -7,7 +7,7 @@ This module provides CRUD operations for DocumentVector model
 from typing import List, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import delete
-from app.models.documentVector import DocumentVector
+from app.models.document_vector import DocumentVector
 from app.utils.logging import get_logger
 
 logger = get_logger(__name__)
