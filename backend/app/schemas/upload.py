@@ -107,6 +107,36 @@ class CompleteUploadResponse(BaseModel):
     final_path: Optional[str] = None
 
 
+class FileMergeRequest(BaseModel):
+    """Request to merge all uploaded chunks into a complete file."""
+    file_md5: str = Field(..., min_length=32, max_length=32, description="MD5 hash of the complete file")
+    file_name: str = Field(..., min_length=1, max_length=255, description="Original filename")
+    
+    @field_validator('file_md5')
+    @classmethod
+    def validate_md5(cls, v: str) -> str:
+        """Ensure MD5 is alphanumeric and lowercase."""
+        if not v.isalnum():
+            raise ValueError('MD5 must be alphanumeric')
+        return v.lower()
+    
+    @field_validator('file_name')
+    @classmethod
+    def validate_filename(cls, v: str) -> str:
+        """Prevent path traversal attacks."""
+        if '..' in v or '/' in v or '\\' in v or v.startswith('.'):
+            raise ValueError('Filename cannot contain path separators or relative paths')
+        if len(v.strip()) == 0:
+            raise ValueError('Filename cannot be empty')
+        return v.strip()
+
+
+class FileMergeResponse(BaseModel):
+    """Response after successfully merging file chunks."""
+    object_url: str = Field(..., description="Final storage path/URL of the merged file")
+    file_size: int = Field(..., description="Total size of the merged file in bytes")
+
+
 class FileUploadStatusResponse(BaseModel):
     """Response for querying file upload status."""
     model_config = ConfigDict(from_attributes=True)
@@ -131,3 +161,22 @@ class ChunkInfoResponse(BaseModel):
     chunk_index: int
     chunk_md5: str
     storage_path: str
+
+
+class FileUploadItem(BaseModel):
+    """Single file upload item in the list."""
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+    
+    file_md5: str = Field(..., alias="fileMd5", description="MD5 hash of the file")
+    file_name: str = Field(..., alias="fileName", description="Original filename")
+    total_size: int = Field(..., alias="totalSize", description="Total file size in bytes")
+    status: int = Field(..., description="0=uploading, 2=merged, 1=completed")
+    created_at: datetime = Field(..., alias="createdAt", description="Upload creation time")
+    merged_at: Optional[datetime] = Field(None, alias="mergedAt", description="Merge completion time")
+
+
+class FileListResponse(BaseModel):
+    """Response for file list endpoint."""
+    status: str = Field(default="success", description="Response status: success or error")
+    data: list[FileUploadItem] = Field(default_factory=list, description="List of uploaded files")
+    message: Optional[str] = Field(None, description="Error message when status=error")

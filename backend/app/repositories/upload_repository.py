@@ -159,3 +159,53 @@ def get_uploaded_chunk_count(db: Session, file_md5: str) -> int:
         Number of uploaded chunks
     """
     return db.query(ChunkInfo).filter(ChunkInfo.file_md5 == file_md5).count()
+
+
+def get_all_file_uploads(
+    db: Session,
+    skip: int = 0,
+    limit: int = 100,
+    status_filter: int = None
+) -> list[FileUpload]:
+    """
+    Retrieve all file upload records with optional pagination and filtering.
+    
+    Args:
+        db: Database session
+        skip: Number of records to skip (for pagination)
+        limit: Maximum number of records to return
+        status_filter: Optional status filter (0=uploading, 2=merged, 1=completed)
+        
+    Returns:
+        List of FileUpload objects ordered by creation time (newest first)
+    """
+    query = db.query(FileUpload)
+    
+    # Apply status filter if provided
+    if status_filter is not None:
+        query = query.filter(FileUpload.status == status_filter)
+    
+    # Order by creation time descending (newest first)
+    query = query.order_by(FileUpload.created_at.desc())
+    
+    # Apply pagination
+    return query.offset(skip).limit(limit).all()
+
+
+def get_file_upload_count(db: Session, status_filter: int = None) -> int:
+    """
+    Count total number of file uploads with optional status filter.
+    
+    Args:
+        db: Database session
+        status_filter: Optional status filter
+        
+    Returns:
+        Total count of file uploads
+    """
+    query = db.query(FileUpload)
+    
+    if status_filter is not None:
+        query = query.filter(FileUpload.status == status_filter)
+    
+    return query.count()
