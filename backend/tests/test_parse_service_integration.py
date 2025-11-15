@@ -26,7 +26,7 @@ sys.path.insert(0, str(backend_path))
 
 from sqlalchemy import text
 from app.database import SessionLocal, engine, Base
-from app.models.documentVector import DocumentVector
+from app.models.document_vector import DocumentVector
 from app.services.parse_service import ParseService
 from app.repositories.document_vector_repository import (
     find_by_file_md5,
