@@ -103,7 +103,7 @@ def test_parse_and_save_text_file():
         
         # Calculate MD5
         file_md5 = hashlib.md5(test_content.encode()).hexdigest()
-        filename = "test_ai_intro.txt"
+        file_name = "test_ai_intro.txt"
         
         # Track for cleanup
         TEST_FILE_MD5S.append(file_md5)
@@ -121,7 +121,7 @@ def test_parse_and_save_text_file():
         service = ParseService(chunk_size=100)
         chunk_count = service.parse_and_save(
             file_md5=file_md5,
-            filename=filename,
+            file_name=file_name,
             file_stream=file_stream,
             db=db
         )
@@ -181,7 +181,7 @@ def test_parse_and_save_with_different_chunk_sizes():
             
             chunk_count = service.parse_and_save(
                 file_md5=file_md5,
-                filename=f"test_{chunk_size}.txt",
+                file_name=f"test_{chunk_size}.txt",
                 file_stream=file_stream,
                 db=db
             )
@@ -235,7 +235,7 @@ def test_parse_and_save_large_content():
         
         chunk_count = service.parse_and_save(
             file_md5=file_md5,
-            filename="large_test.txt",
+            file_name="large_test.txt",
             file_stream=file_stream,
             db=db
         )
@@ -280,7 +280,7 @@ def test_query_and_cleanup():
         file_stream = io.BytesIO(test_content.encode('utf-8'))
         chunk_count = service.parse_and_save(
             file_md5=file_md5,
-            filename="cleanup_test.txt",
+            file_name="cleanup_test.txt",
             file_stream=file_stream,
             db=db
         )

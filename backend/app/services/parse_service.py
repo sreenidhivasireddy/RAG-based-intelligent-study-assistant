@@ -145,24 +145,24 @@ class ParseService:
                 raise MemoryError("Memory usage exceeds the threshold.")
 
 
-    def _detect_file_type(self, filename: str) -> str:
+    def _detect_file_type(self, file_name: str) -> str:
         """
         Detect the file type from the filename.
         """
-        filename = filename.lower()
-        if filename.endswith(".pdf"):
+        file_name = file_name.lower()
+        if file_name.endswith(".pdf"):
             return "pdf"
-        if filename.endswith(".docx"):
+        if file_name.endswith(".docx"):
             return "docx"
-        if filename.endswith(".txt") or filename.endswith(".md"):
+        if file_name.endswith(".txt") or file_name.endswith(".md"):
             return "text"
         return "unknown"
 
-    def get_iterator(self, filename: str, file_stream: BinaryIO):
+    def get_iterator(self, file_name: str, file_stream: BinaryIO):
         """
         Choose appropriate iterator based on the file type.
         """
-        ftype = self._detect_file_type(filename)
+        ftype = self._detect_file_type(file_name)
 
         if ftype == "pdf":
             return PdfTextIterator(file_stream)
@@ -175,7 +175,7 @@ class ParseService:
         return PlainTextIterator(file_stream, self.buffer_size)
 
 
-    def parse_and_save(self, file_md5: str, filename: str, file_stream: BinaryIO, db: Session):
+    def parse_and_save(self, file_md5: str, file_name: str, file_stream: BinaryIO, db: Session):
         """
         Process the file stream in parent-child chunks and save the parsed result to the database.
         """
@@ -183,7 +183,7 @@ class ParseService:
         parent_length = 0
         chunk_id = 0
 
-        iterator = self.get_iterator(filename, file_stream)
+        iterator = self.get_iterator(file_name, file_stream)
 
         for block in iterator:
             self.check_memory()
