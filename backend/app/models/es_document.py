@@ -21,3 +21,7 @@ class EsDocument:
             'vector': self.vector,
             'modelVersion': self.model_version
         }
+
+    # Backwards-compatible alias used by ElasticsearchService
+    def to_es_dict(self):
+        return self.to_dict()
