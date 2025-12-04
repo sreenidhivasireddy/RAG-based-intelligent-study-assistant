@@ -8,22 +8,20 @@ Service layer for parsing documents in stream.
 """
 
 import logging
-from pydoc import Doc
 import re
 import os
 import psutil
 import gc
 from typing import List, Optional, BinaryIO
-from io import BytesIO
 from dotenv import load_dotenv
 import jieba
 import nltk
-from nltk.tokenize import sent_tokenize, word_tokenize
+from nltk.tokenize import  word_tokenize
 from pypdf import PdfReader
 import docx 
 from sqlalchemy.orm import Session
 from app.models import DocumentVector
-from app.repositories.document_vector_repository import create_document_vector, batch_create_document_vectors
+from app.repositories.document_vector_repository import batch_create_document_vectors
 from app.utils.logging import get_logger
 
 # Initialize logger

@@ -6,9 +6,10 @@ import logging
 import uuid
 from typing import List
 from sqlalchemy.orm import Session
+import numpy as np
 
 from app.clients.gemini_embedding_client import GeminiEmbeddingClient
-from app.services.elasticsearch_searvice import ElasticsearchService
+from app.services.es_service import ElasticsearchService
 from app.models.es_document import EsDocument
 from app.models.text_chunk import TextChunk
 from app.repositories import document_vector_repository
@@ -43,7 +44,7 @@ class VectorizationService:
             RuntimeError: Raised when vectorization fails
         """
         try:
-            
+            print("DEBUG: USING VECTORIZE VERSION WITH BULK INDEX")
             # 1. Get file chunks
             chunks = self._fetch_text_chunks(file_md5)
             if not chunks:
@@ -56,6 +57,20 @@ class VectorizationService:
             # 3. Call Gemini model to generate vectors
             logger.info(f"Calling Gemini model to generate vectors, text count: {len(texts)}")
             vectors = self.embedding_client.embed(texts)
+
+            # ==== DEBUG 向量结构 ====
+            print("DEBUG: embed() 返回类型 =", type(vectors))
+            print("DEBUG: embed() 长度 =", len(vectors) if hasattr(vectors, "__len__") else "no len")
+
+            for i, v in enumerate(vectors[:3]):
+                print(f"  vector[{i}] type = {type(v)}")
+                try:
+                    print(f"  vector[{i}] len  = {len(v) if hasattr(v, '__len__') else 'no len'}")
+                    arr = np.array(v)
+                    print(f"  vector[{i}] numpy.shape = {arr.shape}")
+                except Exception as e:
+                    print(f"  vector[{i}] 转 numpy 失败: {e}")
+            # ==== DEBUG END ====
             
             # 4. Build Elasticsearch documents and store
             es_documents = [
@@ -72,6 +87,7 @@ class VectorizationService:
             
             # 5. Bulk store to Elasticsearch
             self.elasticsearch_service.bulk_index(es_documents)
+
             
             logger.info(f"Vectorization completed, fileMd5: {file_md5}")
             
