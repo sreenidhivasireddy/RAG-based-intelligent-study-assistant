@@ -15,7 +15,11 @@ from app.database import SessionLocal
 from app.schemas.upload import ChunkUploadRequest, FileMergeRequest, FileMergeResponse
 from app.services.upload import upload_chunk_service, calculate_upload_progress, merge_file_service
 from app.repositories.upload_repository import get_file_upload
+from app.clients.kafka import KafkaConfig
+from app.models.file_processing_task import FileProcessingTask
+from app.utils.logging import get_logger
 
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/upload", tags=["upload"])
 
@@ -237,6 +241,7 @@ def merge_file(
     db: Session = Depends(get_db)
 ):
     """
+    合并文件并发送到Kafka处理队列
     Merge all uploaded file chunks into a single complete file.
     
     **URL**: `/api/v1/upload/merge`  
@@ -339,7 +344,55 @@ def merge_file(
             file_md5=request.file_md5,
             file_name=request.file_name
         )
+
+        # 2. 创建Kafka任务
+        # 对应Java:
+        # FileProcessingTask task = new FileProcessingTask(...);
+        task = FileProcessingTask(
+            file_md5=request.file_md5,
+            file_path=result['object_url'],
+            file_name=request.file_name
+        )
         
+         # 3. 发送到Kafka
+        # 对应Java:
+        # kafkaTemplate.executeInTransaction(kt -> {
+        #     kt.send(kafkaConfig.getFileProcessingTopic(), task);
+        #     return true;
+        # });
+        
+        try:
+            # 获取producer（对应 @Autowired KafkaTemplate）
+            producer = KafkaConfig.get_producer()
+            
+            # 获取topic名称（对应 kafkaConfig.getFileProcessingTopic()）
+            topic = KafkaConfig.get_file_processing_topic()
+            
+            logger.info(
+                f"发送任务到Kafka: topic={topic}, "
+                f"fileMd5={task.file_md5}, fileName={task.file_name}"
+            )
+            
+            # 发送消息
+            future = producer.send(
+                topic,
+                key=task.file_md5,
+                value=task.to_dict()
+            )
+            
+            # 同步等待发送完成（对应Java的事务提交）
+            record_metadata = future.get(timeout=10)
+            
+            logger.info(
+                f"任务发送成功: partition={record_metadata.partition}, "
+                f"offset={record_metadata.offset}"
+            )
+
+        except Exception as kafka_error:
+            logger.error(f"Kafka发送失败: {kafka_error}", exc_info=True)
+            # 可以选择是否抛出异常
+            # 如果文件已合并，Kafka失败可能只记录日志
+
         # Return success response with file info
         return {
             "code": 200,
