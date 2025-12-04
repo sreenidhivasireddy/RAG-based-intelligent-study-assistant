@@ -15,11 +15,11 @@ class EsDocument:
     def to_dict(self):
         """Convert to dictionary for Elasticsearch storage"""
         return {
-            'fileMd5': self.file_md5,
-            'chunkId': self.chunk_id,
-            'textContent': self.text_content,
+            'file_md5': self.file_md5,
+            'chunk_id': self.chunk_id,
+            'text_content': self.text_content,
             'vector': self.vector,
-            'modelVersion': self.model_version
+            'model_version': self.model_version
         }
 
     # Backwards-compatible alias used by ElasticsearchService

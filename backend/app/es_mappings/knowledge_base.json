@@ -1,0 +1,30 @@
+{
+  "settings": {
+    "number_of_shards": 1,
+    "number_of_replicas": 0
+  },
+  "mappings": {
+    "properties": {
+      "file_md5": {
+        "type": "keyword"
+      },
+      "chunk_id": {
+        "type": "integer"
+      },
+      "text_content": {
+        "type": "text",
+        "analyzer": "icu_analyzer",
+        "search_analyzer": "icu_analyzer"
+      },
+      "vector": {
+        "type": "dense_vector",
+        "dims": 768,
+        "index": true,
+        "similarity": "cosine"
+      },
+      "model_version": {
+        "type": "keyword"
+      }
+    }
+  }
+}

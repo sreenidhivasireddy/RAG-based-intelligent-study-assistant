@@ -20,7 +20,7 @@ if api_key:
     genai.configure(api_key=api_key)
     logger.info("Gemini API key configured successfully")
 else:
-    logger.warning("GEMINI_API_KEY environment variable not found")
+    logger.error("GEMINI_API_KEY environment variable not found")
 
 
 class GeminiEmbeddingClient:
@@ -45,7 +45,21 @@ class GeminiEmbeddingClient:
         self.batch_size = batch_size if batch_size is not None else batch_size_env
         self.max_retries = max_retries
         
+        # Fail fast if API key missing — embedding calls cannot succeed without it.
+        if not api_key:
+            raise RuntimeError("GEMINI_API_KEY environment variable is required to use GeminiEmbeddingClient")
+
         logger.info(f"Initialized Gemini Embedding Client, model: {self.model_name}, batch size: {self.batch_size}")
+
+    @classmethod
+    def is_configured(cls) -> bool:
+        """Return True if the underlying Gemini API key is configured.
+
+        This is a classmethod so callers can check configuration before
+        attempting to construct an instance (the constructor now fails
+        fast when no API key is available).
+        """
+        return bool(api_key)
     
     def embed(self, texts: List[str]) -> List[List[float]]:
         """

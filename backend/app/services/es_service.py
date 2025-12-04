@@ -4,6 +4,7 @@ from elasticsearch import Elasticsearch
 from elasticsearch.helpers import bulk
 from typing import List
 from app.models.es_document import EsDocument
+from app.clients.elastic import ES_INDEX
 import logging
 
 logger = logging.getLogger(__name__)
@@ -13,7 +14,8 @@ class ElasticsearchService:
     
     def __init__(self, es_client: Elasticsearch):
         self.es = es_client
-        self.index_name = "knowledge_base"
+        # Keep index name aligned with global ES configuration
+        self.index_name = ES_INDEX
     
     def bulk_index(self, documents: List[EsDocument]) -> None:
         """
@@ -36,7 +38,12 @@ class ElasticsearchService:
             ]
             
             # Execute bulk operations
-            success, failed = bulk(self.es, actions, raise_on_error=False)
+            # Use refresh=True for immediate visibility without waiting for all replicas
+            success, failed = bulk(self.es, actions, raise_on_error=False, refresh=True)
+            print("🔍 BULK RESULT:")
+            print("   success =", success)
+            print("   failed =", failed)
+
             
             if failed:
                 logger.error(f"Bulk indexing部分失败: {len(failed)} 个文档")
@@ -61,7 +68,7 @@ class ElasticsearchService:
             query = {
                 "query": {
                     "term": {
-                        "fileMd5": file_md5
+                        "file_md5": file_md5
                     }
                 }
             }
