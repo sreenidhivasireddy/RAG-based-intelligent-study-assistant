@@ -10,17 +10,19 @@ from kafka.errors import KafkaError
 
 from app.clients.kafka import KafkaConfig
 from app.models.file_processing_task import FileProcessingTask
+from app.repositories.upload_repository import update_file_status
 from app.utils.logging import get_logger
+from app.database import SessionLocal
 
 logger = get_logger(__name__)
 
 
 class FileProcessingConsumer:
     """
-    文件处理任务消费者
-    监听Kafka主题并处理文件任务
+    consumer for the file processing task
+    listen to the Kafka topic and process the file task
     
-    对应Java的 @KafkaListener 注解的消费者
+    corresponds to the @KafkaListener annotation in Java
     """
     
     def __init__(
@@ -31,13 +33,13 @@ class FileProcessingConsumer:
         retry_backoff_seconds: int = 3
     ):
         """
-        初始化消费者
+        initialize the consumer
         
         Args:
-            parse_service: 文件解析服务实例
-            vectorization_service: 向量化服务实例
-            max_retries: 最大重试次数（对应Java的DefaultErrorHandler配置）
-            retry_backoff_seconds: 重试间隔秒数（对应Java的FixedBackOff 3000ms）
+            parse_service: the parse service instance
+            vectorization_service: the vectorization service instance
+            max_retries: the maximum number of retries(corresponds to Java's DefaultErrorHandler configuration)
+            retry_backoff_seconds: the retry interval in seconds(corresponds to Java's FixedBackOff 3000ms)
         """
         self.parse_service = parse_service
         self.vectorization_service = vectorization_service
@@ -47,10 +49,10 @@ class FileProcessingConsumer:
         self.topic = KafkaConfig.get_file_processing_topic()
         self.dlt_topic = KafkaConfig.get_dlt_topic()
         
-        # 创建消费者
+        # create the consumer with topic(if not topic, consumer will not consume the message)
         self.consumer = KafkaConfig.create_consumer([self.topic])
         
-        # 创建DLT生产者（用于发送失败消息到死信队列）
+        # create the DLT producer(for sending failed messages to the dead letter queue)
         self.dlt_producer = KafkaConfig.get_producer()
         
         logger.info(
@@ -61,29 +63,27 @@ class FileProcessingConsumer:
     
     def download_file_from_storage(self, file_path: str) -> BytesIO:
         """
-        从存储系统下载文件
-        
-        对应Java的 downloadFileFromStorage 方法
-        
+        download the file from the storage system
+    
         Args:
-            file_path: 文件路径或URL
+            file_path: the path or URL of the file
             
         Returns:
-            BytesIO: 文件流
+            BytesIO: the file stream
             
         Raises:
-            Exception: 下载失败时抛出异常
+            Exception: raised when the file download fails
         """
         logger.info(f"Downloading file from storage: {file_path}")
         
         try:
-            # 如果是HTTP/HTTPS URL
+            # if the file path is a HTTP/HTTPS URL
             if file_path.startswith('http://') or file_path.startswith('https://'):
                 logger.info(f"Detected remote URL: {file_path}")
                 
                 response = requests.get(
                     file_path,
-                    timeout=180,  # 3分钟超时（对应Java的180000ms）
+                    timeout=180,  # 3 minutes timeout(corresponds to Java's 180000ms)
                     headers={'User-Agent': 'SmartPAI-FileProcessor/1.0'},
                     stream=True
                 )
@@ -114,50 +114,36 @@ class FileProcessingConsumer:
     
     def process_task(self, task: FileProcessingTask) -> bool:
         """
-        处理单个文件任务
+        process the single file task
         
-        对应Java的 @KafkaListener processTask 方法:
-        public void processTask(FileProcessingTask task) {
-            // 下载文件
-            fileStream = downloadFileFromStorage(task.getFilePath());
-            // 解析文件
-            parseService.parseAndSave(...);
-            // 向量化处理
-            vectorizationService.vectorize(...);
-        }
         
         Args:
-            task: 文件处理任务
+            task: the file processing task
             
         Returns:
-            bool: 处理是否成功
+            bool: whether the task is processed successfully
         """
         logger.info(f"Received task: {task}")
-        logger.info(
-            f"文件权限信息: userId={task.user_id}, "
-            f"orgTag={task.org_tag}, isPublic={task.is_public}"
-        )
         
         file_stream = None
         
         try:
-            # 1. 下载文件
+            # 1. download the file
             file_stream = self.download_file_from_storage(task.file_path)
             
             if file_stream is None:
-                raise Exception("流为空")
+                raise Exception("The file stream is empty")
             
-            # 确保流支持mark/reset（对应Java的BufferedInputStream）
+            # ensure the stream is seekable 
             if not file_stream.seekable():
                 logger.warning("Stream is not seekable, converting to BytesIO")
                 content = file_stream.read()
                 file_stream = BytesIO(content)
             
-            # 2. 解析文件
-            logger.info(f"开始解析文件: fileMd5={task.file_md5}")
+            # 2. parse the file
+            logger.info(f"Parsing file: fileMd5={task.file_md5}")
             
-            # 创建数据库会话用于解析
-            from app.database import SessionLocal
+            # create the database session for parsing
             db = SessionLocal()
             
             try:
@@ -167,16 +153,19 @@ class FileProcessingConsumer:
                     file_stream=file_stream,
                     db=db
                 )
-                logger.info(f"文件解析完成，fileMd5: {task.file_md5}")
+                logger.info(f"File parsed successfully, fileMd5: {task.file_md5}")
             finally:
                 db.close()
             
-            # 3. 向量化处理
-            logger.info(f"开始向量化处理: fileMd5={task.file_md5}")
+            # 3. vectorize the file
+            logger.info(f"Vectorizing file: fileMd5={task.file_md5}")
             self.vectorization_service.vectorize(
                 file_md5=task.file_md5
             )
-            logger.info(f"向量化完成，fileMd5: {task.file_md5}")
+            logger.info(f"Vectorization completed, fileMd5: {task.file_md5}")
+            logger.info(f"Update file status to completed: fileMd5={task.file_md5}")
+            update_file_status(db, task.file_md5, status=1)
+            logger.info(f"File processing completed: fileMd5={task.file_md5}")
             
             return True
             
@@ -185,11 +174,10 @@ class FileProcessingConsumer:
                 f"Error processing task: {task}, error={e}",
                 exc_info=True
             )
-            # 抛出异常让重试机制捕获（对应Java的throw new RuntimeException）
             raise
             
         finally:
-            # 确保关闭输入流
+            # ensure the input stream is closed
             if file_stream:
                 try:
                     file_stream.close()
@@ -198,18 +186,16 @@ class FileProcessingConsumer:
     
     def send_to_dlt(self, message_value: dict, error_info: Exception):
         """
-        发送失败消息到死信队列
-        
-        对应Java的 DeadLetterPublishingRecoverer
+        send the failed message to the dead letter queue
         
         Args:
-            message_value: 原始消息内容
-            error_info: 错误信息
+            message_value: the original message content
+            error_info: the error information
         """
         try:
             logger.warning(
-                f"发送消息到死信队列: topic={self.dlt_topic}, "
-                f"原消息={message_value}"
+                f"Sending message to the dead letter queue: topic={self.dlt_topic}, "
+                f"Original message={message_value}"
             )
             
             dlt_message = {
@@ -224,12 +210,12 @@ class FileProcessingConsumer:
                 self.dlt_topic,
                 value=dlt_message
             )
-            future.get(timeout=5)  # 等待DLT发送完成
+            future.get(timeout=5)  # wait for the DLT to send the message
             
-            logger.info(f"消息已发送到死信队列: {self.dlt_topic}")
+            logger.info(f"Message sent to the dead letter queue: {self.dlt_topic}")
             
         except Exception as e:
-            logger.error(f"发送到死信队列失败: {e}", exc_info=True)
+            logger.error(f"Failed to send message to the dead letter queue: {e}", exc_info=True)
     
     def process_with_retry(
         self,
@@ -237,22 +223,16 @@ class FileProcessingConsumer:
         message_value: dict
     ) -> bool:
         """
-        带重试机制的任务处理
+        process the task with retry mechanism
         
-        对应Java的 DefaultErrorHandler 和 FixedBackOff:
-        DefaultErrorHandler errorHandler = new DefaultErrorHandler(
-            recoverer, 
-            new FixedBackOff(3000L, 4)
-        );
-        
-        最多重试4次，每次间隔3秒
+        max 4 retries, 3 seconds interval
         
         Args:
-            task: 文件处理任务
-            message_value: 原始消息（用于发送到DLT）
+            task: the file processing task
+            message_value: the original message (for sending to DLT)
             
         Returns:
-            bool: 处理是否成功
+            bool: whether the task is processed successfully
         """
         retry_count = 0
         last_exception = None
@@ -261,18 +241,18 @@ class FileProcessingConsumer:
             try:
                 if retry_count > 0:
                     logger.info(
-                        f"重试处理任务 (第{retry_count}/{self.max_retries}次): "
+                        f"Retrying task (attempt {retry_count}/{self.max_retries}): "
                         f"file_md5={task.file_md5}, file_name={task.file_name}"
                     )
                 
-                # 尝试处理任务
+                # try to process the task
                 self.process_task(task)
                 
-                # 成功则返回
+                # if successful, return
                 if retry_count > 0:
                     logger.info(
-                        f"任务重试成功: file_md5={task.file_md5}, "
-                        f"重试次数={retry_count}"
+                        f"Task retry successful: file_md5={task.file_md5}, "
+                        f"Retry count={retry_count}"
                     )
                 return True
                 
@@ -281,22 +261,22 @@ class FileProcessingConsumer:
                 retry_count += 1
                 
                 logger.error(
-                    f"处理失败 (尝试 {retry_count}/{self.max_retries + 1}): "
+                    f"Task processing failed (attempt {retry_count}/{self.max_retries + 1}): "
                     f"file_md5={task.file_md5}, error={e}"
                 )
                 
                 if retry_count <= self.max_retries:
-                    # 还有重试机会，等待后重试
+                    # there are still retry opportunities, wait and retry
                     logger.info(
-                        f"等待 {self.retry_backoff} 秒后重试... "
-                        f"(剩余重试次数: {self.max_retries - retry_count + 1})"
+                        f"Waiting {self.retry_backoff} seconds before retrying... "
+                        f"(Remaining retry attempts: {self.max_retries - retry_count + 1})"
                     )
                     time.sleep(self.retry_backoff)
                 else:
-                    # 重试次数用尽，发送到死信队列
+                    # retry attempts exhausted, send to the dead letter queue
                     logger.error(
-                        f"任务处理失败，已达最大重试次数({self.max_retries}次)，"
-                        f"发送到死信队列: file_md5={task.file_md5}, "
+                        f"Task processing failed, max retry attempts reached ({self.max_retries} times), "
+                        f"Sending to the dead letter queue: file_md5={task.file_md5}, "
                         f"fileName={task.file_name}"
                     )
                     self.send_to_dlt(message_value, last_exception)
@@ -306,75 +286,71 @@ class FileProcessingConsumer:
     
     def start_consuming(self):
         """
-        开始消费消息
-        
-        这是主要的消费循环，对应Java的 @KafkaListener 自动监听
+        start consuming messages
         """
-        logger.info(f"开始监听Kafka主题: {self.topic}")
-        logger.info(f"消费者组: {KafkaConfig.CONSUMER_CONFIG['group_id']}")
+        logger.info(f"Listening to Kafka topic: {self.topic}")
+        logger.info(f"Consumer group: {KafkaConfig.CONSUMER_CONFIG['group_id']}")
         
         try:
             for message in self.consumer:
                 logger.info(
-                    f"接收到消息: topic={message.topic}, "
+                    f"Received message: topic={message.topic}, "
                     f"partition={message.partition}, "
                     f"offset={message.offset}, "
                     f"key={message.key}"
                 )
                 
                 try:
-                    # 反序列化任务对象
+                    # deserialize the task object
                     task = FileProcessingTask.from_dict(message.value)
                     
                     logger.info(
-                        f"解析任务成功: file_md5={task.file_md5}, "
+                        f"Task parsed successfully: file_md5={task.file_md5}, "
                         f"file_name={task.file_name}"
                     )
                     
-                    # 处理任务（带重试机制）
+                    # process the task (with retry mechanism)
                     success = self.process_with_retry(task, message.value)
                     
                     if success:
                         logger.info(
-                            f"任务处理成功: file_md5={task.file_md5}, "
+                            f"Task processed successfully: file_md5={task.file_md5}, "
                             f"file_name={task.file_name}"
                         )
                     else:
                         logger.error(
-                            f"任务处理最终失败: file_md5={task.file_md5}, "
+                            f"Task processing failed: file_md5={task.file_md5}, "
                             f"file_name={task.file_name}"
                         )
                     
                 except Exception as e:
                     logger.error(
-                        f"处理消息时发生错误: offset={message.offset}, error={e}",
+                        f"Error processing message: offset={message.offset}, error={e}",
                         exc_info=True
                     )
-                    # 继续处理下一条消息（不让一条错误消息阻塞整个消费者）
+                    # continue processing the next message (don't block the entire consumer)
                     
         except KeyboardInterrupt:
-            logger.info("收到中断信号，停止消费...")
+            logger.info("Received interrupt signal, stopping consumption...")
         except Exception as e:
-            logger.error(f"消费循环出错: {e}", exc_info=True)
+            logger.error(f"Error in consumption loop: {e}", exc_info=True)
         finally:
             self.close()
     
     def close(self):
         """
-        关闭消费者和相关资源
-        
-        对应Java中的资源清理
+        close the consumer and related resources
         """
-        logger.info("正在关闭FileProcessingConsumer...")
+        logger.info("Closing FileProcessingConsumer...")
         
         if self.consumer:
             try:
                 self.consumer.close()
-                logger.info("Kafka Consumer已关闭")
+                logger.info("Kafka Consumer closed")
             except Exception as e:
-                logger.error(f"关闭Consumer时出错: {e}")
+                logger.error(f"Error closing Consumer: {e}")
         
-        # 注意：不要关闭dlt_producer，因为它是全局共享的
-        # KafkaConfig会在应用关闭时统一关闭
+        # note: don't close dlt_producer, it is globally shared
+        # KafkaConfig will be closed when the application is closed
         
-        logger.info("FileProcessingConsumer已关闭")
+        logger.info("FileProcessingConsumer closed")

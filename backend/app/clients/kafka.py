@@ -29,28 +29,28 @@ class KafkaConfig:
     
     # Producer configuration (matching Java settings)
     PRODUCER_CONFIG = {
-        'bootstrap_servers': KAFKA_BOOTSTRAP_SERVERS,
-        'value_serializer': lambda v: json.dumps(v).encode('utf-8'),  # JSON序列化
-        'key_serializer': lambda k: k.encode('utf-8') if k else None,
-        'acks': 'all',  # 等待所有副本确认 (对应Java的acks=all)
-        'retries': 3,   # 重试3次 (对应Java的retries=3)
-        # 'enable_idempotence': True,  # kafka-python不支持此配置
-        'max_in_flight_requests_per_connection': 5,
-        'compression_type': 'gzip',  # 压缩
-        'linger_ms': 10,  # 批量发送延迟
+        'bootstrap_servers': KAFKA_BOOTSTRAP_SERVERS, # clarify where is the Kafka Broker
+        'value_serializer': lambda v: json.dumps(v).encode('utf-8'),  # serialize the value to JSON
+        'key_serializer': lambda k: k.encode('utf-8') if k else None, #control the key serialization(partition key)
+        'acks': 'all',  # waiting for all replicas to confirm the message
+        'retries': 3,   # retry 3 times if the message is not acknowledged
+        # 'enable_idempotence': True,  # kafka-python not support it
+        'max_in_flight_requests_per_connection': 5, # 5 requests per connection
+        'compression_type': 'gzip',  # compression type
+        'linger_ms': 10,  # batch send delay
         'request_timeout_ms': 30000,
     }
     
     # Consumer configuration
     CONSUMER_CONFIG = {
         'bootstrap_servers': KAFKA_BOOTSTRAP_SERVERS,
-        'group_id': KAFKA_CONSUMER_GROUP,
-        'auto_offset_reset': 'earliest',  # 从最早的消息开始
-        'enable_auto_commit': True,
+        'group_id': KAFKA_CONSUMER_GROUP, # identify which consumer group to consume the message
+        'auto_offset_reset': 'latest',  # start from the latest message
+        'enable_auto_commit': True, # commit the offset to the broker automatically
         'auto_commit_interval_ms': 1000,
-        'value_deserializer': lambda v: json.loads(v.decode('utf-8')),
-        'key_deserializer': lambda k: k.decode('utf-8') if k else None,
-        'max_poll_records': 10,
+        'value_deserializer': lambda v: json.loads(v.decode('utf-8')), # deserialize bytes to python object
+        'key_deserializer': lambda k: k.decode('utf-8') if k else None, # bytes to string
+        'max_poll_records': 10, # max number of records to fetch in one poll
         'session_timeout_ms': 30000,
     }
     
