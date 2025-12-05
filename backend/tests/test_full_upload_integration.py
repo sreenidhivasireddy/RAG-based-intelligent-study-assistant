@@ -1,14 +1,13 @@
 """
-完整的文件上传集成测试
-测试流程：
-1. 分片上传文件
-2. 合并文件
-3. Kafka 发送任务
-4. Consumer 消费并处理（parse + vectorize）
-5. 验证 MySQL 和 Elasticsearch 中的数据
-6. 清理测试数据
+Full Upload Integration Test
+Test Flow:
+1. Upload chunks
+2. Merge file and send to Kafka
+3. Consumer consume and process (parse + vectorize)
+4. Verify MySQL and Elasticsearch data
+5. Cleanup test data
 
-测试文件：Desktop/NLP_lab06_QA.pdf
+Test File: Desktop/NLP_lab06_QA.pdf
 """
 
 import os
@@ -42,22 +41,19 @@ from app.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-# 测试配置
+# Test Configuration
 TEST_FILE_PATH = os.path.expanduser("~/Desktop/NLP_lab06_QA.pdf")
 CHUNK_SIZE = 5 * 1024 * 1024  # 5MB per chunk
-TEST_USER_ID = "test_user_001"
-TEST_ORG_TAG = "test_org"
-TEST_IS_PUBLIC = False
 
-# 全局变量
+# Global variables
 test_file_md5: Optional[str] = None
 consumer_thread: Optional[threading.Thread] = None
 consumer_running = False
 
 
 def calculate_file_md5(file_path: str) -> str:
-    """计算文件的 MD5"""
-    logger.info(f"计算文件 MD5: {file_path}")
+    """calculate the MD5 of the file"""
+    logger.info(f"Calculating MD5 of the file: {file_path}")
     
     md5_hash = hashlib.md5()
     with open(file_path, "rb") as f:
@@ -65,12 +61,12 @@ def calculate_file_md5(file_path: str) -> str:
             md5_hash.update(chunk)
     
     file_md5 = md5_hash.hexdigest()
-    logger.info(f"文件 MD5: {file_md5}")
+    logger.info(f"MD5: {file_md5}")
     return file_md5
 
 
 def split_file_to_chunks(file_path: str) -> list[bytes]:
-    """将文件分片"""
+    """split the file into chunks"""
     chunks = []
     with open(file_path, "rb") as f:
         while True:
@@ -79,42 +75,42 @@ def split_file_to_chunks(file_path: str) -> list[bytes]:
                 break
             chunks.append(chunk)
     
-    logger.info(f"文件分片完成: {len(chunks)} 个分片")
+    logger.info(f"File split completed: {len(chunks)} chunks")
     return chunks
 
 
 def test_step_1_upload_chunks():
-    """步骤1：分片上传文件"""
+    """step 1: upload chunks"""
     global test_file_md5
     
     logger.info("=" * 80)
-    logger.info("步骤 1: 分片上传文件")
+    logger.info("step 1: upload chunks")
     logger.info("=" * 80)
     
-    # 检查文件是否存在
+    # check if the file exists
     if not os.path.exists(TEST_FILE_PATH):
-        raise FileNotFoundError(f"测试文件不存在: {TEST_FILE_PATH}")
+        raise FileNotFoundError(f"Test file not found: {TEST_FILE_PATH}")
     
-    # 获取文件大小
+    # get the file size
     file_size = os.path.getsize(TEST_FILE_PATH)
-    logger.info(f"文件路径: {TEST_FILE_PATH}")
-    logger.info(f"文件大小: {file_size / 1024 / 1024:.2f} MB")
+    logger.info(f"File path: {TEST_FILE_PATH}")
+    logger.info(f"File size: {file_size / 1024 / 1024:.2f} MB")
     
-    # 计算文件 MD5
+    # calculate the MD5 of the file
     test_file_md5 = calculate_file_md5(TEST_FILE_PATH)
     
-    # 分片文件
+    # split the file into chunks
     chunks = split_file_to_chunks(TEST_FILE_PATH)
     total_chunks = len(chunks)
     
     db = SessionLocal()
     
     try:
-        # 上传每个分片
+        # upload each chunk
         for chunk_index, chunk_data in enumerate(chunks):
-            logger.info(f"上传分片 {chunk_index + 1}/{total_chunks} (大小: {len(chunk_data) / 1024:.2f} KB)")
+            logger.info(f"Uploading chunk {chunk_index + 1}/{total_chunks} (size: {len(chunk_data) / 1024:.2f} KB)")
             
-            # 创建请求对象
+            # create the request object
             request = ChunkUploadRequest(
                 file_md5=test_file_md5,
                 chunk_index=chunk_index,
@@ -123,32 +119,32 @@ def test_step_1_upload_chunks():
                 total_size=file_size
             )
             
-            # 上传分片
+            # upload the chunk
             result = upload_chunk_service(
                 db=db,
                 request=request,
                 file_data=chunk_data
             )
             
-            logger.info(f"✓ 分片 {chunk_index} 上传成功")
+            logger.info(f"✓ Chunk {chunk_index} uploaded successfully")
         
-        logger.info(f"\n✅ 所有分片上传完成: {total_chunks} 个分片")
+        logger.info(f"\n✅ All chunks uploaded successfully: {total_chunks} chunks")
         
     finally:
         db.close()
 
 
 def test_step_2_merge_file_and_send_to_kafka():
-    """步骤2：合并文件并发送到 Kafka"""
+    """step 2: merge file and send to Kafka"""
     logger.info("\n" + "=" * 80)
-    logger.info("步骤 2: 合并文件并发送到 Kafka")
+    logger.info("step 2: merge file and send to Kafka")
     logger.info("=" * 80)
     
     db = SessionLocal()
     
     try:
-        # 1. 合并文件
-        logger.info(f"开始合并文件: {test_file_md5}")
+        # 1. merge the file
+        logger.info(f"Merging file: {test_file_md5}")
         
         result = merge_file_service(
             db=db,
@@ -156,46 +152,43 @@ def test_step_2_merge_file_and_send_to_kafka():
             file_name=os.path.basename(TEST_FILE_PATH)
         )
         
-        logger.info(f"✅ 文件合并成功")
-        logger.info(f"   MinIO 路径: {result.get('object_url', 'N/A')}")
-        logger.info(f"   文件大小: {result.get('file_size', 0) / 1024:.2f} KB")
+        logger.info(f"✅ File merged successfully")
+        logger.info(f"   MinIO path: {result.get('object_url', 'N/A')}")
+        logger.info(f"    File size: {result.get('file_size', 0) / 1024:.2f} KB")
         
-        # 2. 生成 MinIO 预签名 URL
+        # 2. generate the presigned URL for the file
         object_name = result['object_url']
         logger.info(f"object_name: {object_name}")
         logger.info(f"minio_client is None: {minio_client is None}")
         logger.info(f"starts with http: {object_name.startswith('http')}")
         
         if minio_client and not object_name.startswith('http'):
-            # 生成预签名 URL (有效期 7天)
+            # generate the presigned URL (valid for 7 days)
             from datetime import timedelta
-            logger.info(f"正在为 MinIO 对象生成预签名 URL: {object_name}")
+            logger.info(f"Generating the presigned URL for the file: {object_name}")
             presigned_url = minio_client.presigned_get_object(
                 MINIO_BUCKET,
                 object_name,
                 expires=timedelta(days=7)
             )
             file_url = presigned_url
-            logger.info(f"✅ 生成预签名 URL成功")
+            logger.info(f"✅ generated the presigned URL successfully")
             logger.info(f"   URL: {file_url[:150]}...")
         else:
-            logger.info(f"使用原始路径: {object_name}")
+            logger.info(f"using the original path: {object_name}")
             file_url = object_name
         
-        # 3. 发送任务到 Kafka
+        # 3. send the task to Kafka
         task = FileProcessingTask(
             file_md5=test_file_md5,
             file_path=file_url,
-            file_name=os.path.basename(TEST_FILE_PATH),
-            user_id=TEST_USER_ID,
-            org_tag=TEST_ORG_TAG,
-            is_public=TEST_IS_PUBLIC
+            file_name=os.path.basename(TEST_FILE_PATH)
         )
         
         producer = KafkaConfig.get_producer()
         topic = KafkaConfig.get_file_processing_topic()
         
-        logger.info(f"发送任务到 Kafka: topic={topic}")
+        logger.info(f"Sending task to Kafka: topic={topic}")
         
         future = producer.send(
             topic,
@@ -206,7 +199,7 @@ def test_step_2_merge_file_and_send_to_kafka():
         record_metadata = future.get(timeout=10)
         
         logger.info(
-            f"✅ Kafka 消息发送成功: "
+            f"✅ Kafka message sent successfully: "
             f"partition={record_metadata.partition}, "
             f"offset={record_metadata.offset}"
         )
@@ -218,34 +211,34 @@ def test_step_2_merge_file_and_send_to_kafka():
 
 
 def start_consumer_thread():
-    """启动 Consumer 线程"""
+    """start the Consumer thread"""
     global consumer_running
     
     logger.info("\n" + "=" * 80)
-    logger.info("步骤 3: 启动 Kafka Consumer")
+    logger.info("step 3: start the Kafka Consumer")
     logger.info("=" * 80)
     
-    # 创建服务实例
+    # create the service instance
     db = SessionLocal()
     parse_service = ParseService(chunk_size=500)
     
-    # 创建 embedding 客户端
+    # create the embedding client
     if not GeminiEmbeddingClient.is_configured():
         raise RuntimeError("GEMINI_API_KEY 未配置")
     embedding_client = GeminiEmbeddingClient()
     
-    # 创建 ES 服务
+    # create the ES service
     es_client = es.get_client()
     es_service = ElasticsearchService(es_client)
     
-    # 创建向量化服务
+    # create the vectorization service
     vectorization_service = VectorizationService(
         embedding_client=embedding_client,
         elasticsearch_service=es_service,
         db=db
     )
     
-    # 创建 consumer
+    # create the consumer
     consumer = FileProcessingConsumer(
         parse_service=parse_service,
         vectorization_service=vectorization_service,
@@ -256,14 +249,14 @@ def start_consumer_thread():
     consumer_running = True
     
     def consume_messages():
-        """消费消息的函数"""
-        logger.info("Consumer 开始监听 Kafka 消息...")
+        """consume the messages"""
+        logger.info("Consumer is listening to Kafka messages...")
         
         try:
-            # 只处理我们的测试消息
+            # only process our test messages
             processed = 0
-            max_messages = 10  # 最多处理10条消息
-            max_wait_seconds = 30  # 最多等待30秒
+            max_messages = 10  # maximum number of messages to process
+            max_wait_seconds = 30  # maximum wait time in seconds
             
             import time as time_module
             start_time = time_module.time()
@@ -272,88 +265,88 @@ def start_consumer_thread():
                 if not consumer_running:
                     break
                 
-                # 检查超时
+                # check if the timeout is reached
                 if time_module.time() - start_time > max_wait_seconds:
-                    logger.info("Consumer 等待超时，退出")
+                    logger.info("Consumer timeout, exiting")
                     break
                 
-                logger.info(f"收到 Kafka 消息: file_md5={message.value.get('file_md5', 'N/A')}")
+                logger.info(f"Received Kafka message: file_md5={message.value.get('file_md5', 'N/A')}")
                 
-                # 处理消息
+                # process the message
                 task = FileProcessingTask.from_dict(message.value)
                 
-                # 只处理我们的测试文件
+                # only process our test file
                 if task.file_md5 == test_file_md5:
-                    logger.info(f"✓ 找到目标消息，开始处理: {task.file_name}")
+                    logger.info(f"✓ Found target message, starting to process: {task.file_name}")
                     success = consumer.process_task(task)
                     
                     if success:
-                        logger.info(f"✅ 任务处理成功: {task.file_name}")
+                        logger.info(f"✅ Task processed successfully: {task.file_name}")
                     else:
-                        logger.error(f"❌ 任务处理失败: {task.file_name}")
+                        logger.error(f"❌ Task processed failed: {task.file_name}")
                     
-                    # 处理完我们的消息后退出
+                    # after processing our message, exit
                     break
                 else:
-                    logger.info(f"跳过其他消息: {task.file_md5}")
+                    logger.info(f"Skipping other messages: {task.file_md5}")
                 
                 processed += 1
                 if processed >= max_messages:
-                    logger.info(f"已处理 {processed} 条消息，停止 consumer")
+                    logger.info(f"Processed {processed} messages, stopping consumer")
                     break
                     
         except Exception as e:
-            logger.error(f"Consumer 处理消息失败: {e}", exc_info=True)
+            logger.error(f"Consumer processing message failed: {e}", exc_info=True)
         finally:
             consumer.close()
             db.close()
     
-    # 启动线程
+    # start the thread
     thread = threading.Thread(target=consume_messages, daemon=True)
     thread.start()
     
-    logger.info("✓ Consumer 线程已启动")
+    logger.info("✓ Consumer thread started")
     
     return thread
 
 
 def test_step_3_wait_for_processing():
-    """步骤3：等待 Kafka Consumer 处理"""
+    """step 3: wait for the Kafka Consumer to process"""
     global consumer_thread
     
-    # 启动 consumer
+    # start the consumer
     consumer_thread = start_consumer_thread()
     
-    # 等待处理完成
-    logger.info("\n等待 Consumer 处理任务...")
+    # wait for the processing to complete
+    logger.info("\nWaiting for the Consumer to process the task...")
     
-    # 最多等待 60 秒
+    # maximum wait time in seconds
     consumer_thread.join(timeout=60)
     
     if consumer_thread.is_alive():
-        logger.warning("Consumer 线程仍在运行，可能需要更多时间")
+        logger.warning("Consumer thread is still running, may need more time")
     else:
-        logger.info("✅ Consumer 处理完成")
+        logger.info("✅ Consumer processed successfully")
 
 
 def test_step_4_verify_mysql():
-    """步骤4：验证 MySQL 中的数据"""
+    """step 4: verify the data in MySQL"""
     logger.info("\n" + "=" * 80)
-    logger.info("步骤 4: 验证 MySQL 数据")
+    logger.info("step 4: verify the data in MySQL")
     logger.info("=" * 80)
     
     db = SessionLocal()
     
     try:
-        # 查询文本块
+        # query the chunks
         chunks = document_vector_repository.find_by_file_md5(db, test_file_md5)
         
         if not chunks:
-            raise AssertionError(f"❌ MySQL 中未找到文档块: {test_file_md5}")
+            raise AssertionError(f"❌ No chunks found in MySQL: {test_file_md5}")
         
-        logger.info(f"✅ MySQL 验证成功")
-        logger.info(f"   找到 {len(chunks)} 个文本块")
-        logger.info(f"   示例块内容: {chunks[0].text_content[:100]}...")
+        logger.info(f"✅ MySQL verification successful")
+        logger.info(f"    Found {len(chunks)} chunks")
+        logger.info(f"    Example chunk content: {chunks[0].text_content[:100]}...")
         
         return len(chunks)
         
@@ -362,17 +355,17 @@ def test_step_4_verify_mysql():
 
 
 def test_step_5_verify_elasticsearch():
-    """步骤5：验证 Elasticsearch 中的数据"""
+    """step 5: verify the data in Elasticsearch"""
     logger.info("\n" + "=" * 80)
-    logger.info("步骤 5: 验证 Elasticsearch 数据")
+    logger.info("step 5: verify the data in Elasticsearch")
     logger.info("=" * 80)
     
     es_client = es.get_client()
     
-    # 等待 ES 索引刷新
+    # wait for the ES index to be refreshed
     time.sleep(2)
     
-    # 查询 ES
+    # query the ES
     resp = es_client.search(
         index=ES_INDEX,
         query={"term": {"file_md5": {"value": test_file_md5}}},
@@ -382,15 +375,15 @@ def test_step_5_verify_elasticsearch():
     hits = resp["hits"]["hits"]
     
     if not hits:
-        raise AssertionError(f"❌ Elasticsearch 中未找到文档: {test_file_md5}")
+        raise AssertionError(f"❌ No documents found in Elasticsearch: {test_file_md5}")
     
-    logger.info(f"✅ Elasticsearch 验证成功")
-    logger.info(f"   找到 {len(hits)} 个文档")
+    logger.info(f"✅ Elasticsearch verification successful")
+    logger.info(f"    Found {len(hits)} documents")
     
-    # 验证文档结构
+    # verify the document structure
     doc = hits[0]["_source"]
-    logger.info(f"   文档字段: {list(doc.keys())}")
-    logger.info(f"   示例文本: {doc.get('text_content', '')[:100]}...")
+    logger.info(f"    Document fields: {list(doc.keys())}")
+    logger.info(f"    Example text: {doc.get('text_content', '')[:100]}...")
     
     assert "file_md5" in doc
     assert "chunk_id" in doc
@@ -401,32 +394,32 @@ def test_step_5_verify_elasticsearch():
 
 
 def test_step_6_cleanup():
-    """步骤6：清理测试数据"""
+    """step 6: cleanup the test data"""
     logger.info("\n" + "=" * 80)
-    logger.info("步骤 6: 清理测试数据")
+    logger.info("step 6: cleanup the test data")
     logger.info("=" * 80)
     
     db = SessionLocal()
     
     try:
-        # 1. 清理 MySQL 文档向量
+        # 1. cleanup the MySQL document vectors
         deleted_chunks = document_vector_repository.delete_by_file_md5(db, test_file_md5)
-        logger.info(f"✓ 清理 MySQL: 删除 {deleted_chunks} 个文本块")
+        logger.info(f"✓ Cleanup MySQL: deleted {deleted_chunks} chunks")
         
-        # 2. 清理 MinIO（可选）
+        # 2. cleanup the MinIO (optional)
         try:
             if minio_client:
-                # 删除合并后的文件（注意路径包含 "documents/" 前缀）
+                # delete the merged file (note the path contains the "documents/" prefix)
                 object_name = f"documents/{test_file_md5}/{os.path.basename(TEST_FILE_PATH)}"
                 minio_client.remove_object(MINIO_BUCKET, object_name)
-                logger.info(f"✓ 清理 MinIO 合并文件: {object_name}")
+                logger.info(f"✓ Cleanup MinIO merged file: {object_name}")
         except Exception as e:
-            logger.warning(f"MinIO 合并文件清理失败: {e}")
+            logger.warning(f"MinIO merged file cleanup failed: {e}")
         
-        # 5. 清理 MinIO 分片文件
+        # 5. cleanup the MinIO chunks
         try:
             if minio_client:
-                # 删除所有分片
+                # delete all chunks
                 objects = minio_client.list_objects(
                     MINIO_BUCKET, 
                     prefix=f"chunks/{test_file_md5}/", 
@@ -438,89 +431,89 @@ def test_step_6_cleanup():
                     deleted_count += 1
                 
                 if deleted_count > 0:
-                    logger.info(f"✓ 清理 MinIO 分片文件: 删除 {deleted_count} 个分片")
+                    logger.info(f"✓ Cleanup MinIO chunks: deleted {deleted_count} chunks")
                 else:
-                    logger.info("✓ 清理 MinIO 分片文件: 无需清理")
+                    logger.info("✓ Cleanup MinIO chunks: no need to cleanup")
         except Exception as e:
-            logger.warning(f"MinIO 分片文件清理失败: {e}")
+            logger.warning(f"MinIO chunks cleanup failed: {e}")
         
-        # 6. 清理 Elasticsearch
+        # 6. cleanup the Elasticsearch
         es_client = es.get_client()
         result = es_client.delete_by_query(
             index=ES_INDEX,
             query={"term": {"file_md5": {"value": test_file_md5}}}
         )
-        logger.info(f"✓ 清理 Elasticsearch: 删除 {result.get('deleted', 0)} 个文档")
+        logger.info(f"✓ Cleanup Elasticsearch: deleted {result.get('deleted', 0)} documents")
         
-        logger.info("✅ 所有测试数据已清理")
+        logger.info("✅ All test data cleaned")
         
     finally:
         db.close()
 
 
 def run_full_integration_test():
-    """运行完整的集成测试"""
+    """run the full integration test"""
     global consumer_running
     
     logger.info("\n")
     logger.info("=" * 80)
-    logger.info("🚀 完整文件上传集成测试")
+    logger.info("🚀 Full file upload integration test")
     logger.info("=" * 80)
-    logger.info(f"测试文件: {TEST_FILE_PATH}")
+    logger.info(f"Test file: {TEST_FILE_PATH}")
     logger.info("=" * 80)
     
     start_time = time.time()
     
     try:
-        # 步骤 1：上传分片
+        # step 1: upload chunks
         test_step_1_upload_chunks()
         
-        # 步骤 2：合并文件并发送到 Kafka
+        # step 2: merge file and send to Kafka
         merge_result = test_step_2_merge_file_and_send_to_kafka()
         
-        # 步骤 3：启动 Consumer 并等待处理
+        # step 3: start the Consumer and wait for the processing
         test_step_3_wait_for_processing()
         
-        # 给予一些时间让处理完成
+        # give some time for the processing to complete
         time.sleep(5)
         
-        # 步骤 4：验证 MySQL
+        # step 4: verify the data in MySQL
         chunk_count = test_step_4_verify_mysql()
         
-        # 步骤 5：验证 Elasticsearch
+        # step 5: verify the data in Elasticsearch
         es_doc_count = test_step_5_verify_elasticsearch()
         
-        # 验证数量一致性
+        # verify the consistency of the counts
         if chunk_count != es_doc_count:
             logger.warning(
-                f"⚠️ 警告: MySQL 块数 ({chunk_count}) 与 ES 文档数 ({es_doc_count}) 不一致"
+                f"⚠️ Warning: MySQL chunks ({chunk_count}) and ES documents ({es_doc_count}) are not consistent"
             )
         
         elapsed_time = time.time() - start_time
         
         logger.info("\n" + "=" * 80)
-        logger.info("🎉 集成测试全部通过！")
+        logger.info("🎉 All integration tests passed!")
         logger.info("=" * 80)
-        logger.info(f"✓ 文件 MD5: {test_file_md5}")
-        logger.info(f"✓ MySQL 文本块: {chunk_count}")
-        logger.info(f"✓ ES 文档数: {es_doc_count}")
-        logger.info(f"✓ 总耗时: {elapsed_time:.2f} 秒")
+        logger.info(f"✓ File MD5: {test_file_md5}")
+        logger.info(f"✓ MySQL chunks: {chunk_count}")
+        logger.info(f"✓ ES documents: {es_doc_count}")
+        logger.info(f"✓ Total time: {elapsed_time:.2f} seconds")
         logger.info("=" * 80)
         
     except Exception as e:
-        logger.error(f"\n❌ 集成测试失败: {e}", exc_info=True)
+        logger.error(f"\n❌ Integration test failed: {e}", exc_info=True)
         raise
         
     finally:
-        # 停止 consumer
+        # stop the consumer
         consumer_running = False
         
-        # 清理测试数据
+        # cleanup the test data
         if test_file_md5:
             try:
                 test_step_6_cleanup()
             except Exception as e:
-                logger.error(f"清理测试数据失败: {e}")
+                logger.error(f"Cleanup test data failed: {e}")
 
 
 if __name__ == "__main__":

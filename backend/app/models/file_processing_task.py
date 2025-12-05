@@ -9,12 +9,12 @@ from typing import Optional
 @dataclass
 class FileProcessingTask:
     """
-    文件处理任务类，用于Kafka消息传递
+    wrapper class for the file processing task
     
     Attributes:
-        file_md5: 文件的 MD5 校验值
-        file_path: 文件存储路径/URL
-        file_name: 文件名
+        file_md5: the MD5 hash of the file
+        file_path: the path of the file
+        file_name: the name of the file
     """
     file_md5: str
     file_path: str
@@ -22,7 +22,7 @@ class FileProcessingTask:
     
     def to_dict(self) -> dict:
         """
-        转换为字典，用于Kafka JSON序列化
+        convert the task to a dictionary
         """
         return {
             'file_md5': self.file_md5,
@@ -33,8 +33,7 @@ class FileProcessingTask:
     @classmethod
     def from_dict(cls, data: dict) -> 'FileProcessingTask':
         """
-        从字典创建对象，用于Kafka消息反序列化
-        兼容驼峰和下划线命名
+        create the task from a dictionary
         """
         return cls(
             file_md5=data.get('file_md5') or data.get('file_md5', ''),

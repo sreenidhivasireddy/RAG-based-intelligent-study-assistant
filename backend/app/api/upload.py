@@ -16,6 +16,7 @@ from app.schemas.upload import ChunkUploadRequest, FileMergeRequest, FileMergeRe
 from app.services.upload import upload_chunk_service, calculate_upload_progress, merge_file_service
 from app.repositories.upload_repository import get_file_upload
 from app.clients.kafka import KafkaConfig
+from app.clients.minio import minio_client, MINIO_BUCKET
 from app.models.file_processing_task import FileProcessingTask
 from app.utils.logging import get_logger
 
@@ -345,53 +346,66 @@ def merge_file(
             file_name=request.file_name
         )
 
-        # 2. 创建Kafka任务
-        # 对应Java:
-        # FileProcessingTask task = new FileProcessingTask(...);
+        # generate the presigned URL for the file
+        # so that the consumer can download the file via HTTP
+        # instead of using the MinIO object path (e.g. "documents/abc123/file.pdf")
+        object_name = result['object_url']
+        
+        if minio_client and not object_name.startswith('http'):
+            # generate the presigned URL (valid for 7 days)
+            from datetime import timedelta
+            logger.info(f"generating the presigned URL for the file: {object_name}")
+            
+            presigned_url = minio_client.presigned_get_object(
+                MINIO_BUCKET,
+                object_name,
+                expires=timedelta(days=7)
+            )
+            file_url = presigned_url
+            logger.info(f"✅ generated the presigned URL successfully (valid for 7 days)")
+            logger.info(f"   URL: {file_url[:100]}...")
+        else:
+            # if it is already an HTTP URL or minio_client is not configured, use the original path
+            logger.info(f"使用原始路径: {object_name}")
+            file_url = object_name
+
+        # 3. create the Kafka task
         task = FileProcessingTask(
             file_md5=request.file_md5,
-            file_path=result['object_url'],
+            file_path=file_url,  # use the presigned URL instead of the object path
             file_name=request.file_name
         )
         
-         # 3. 发送到Kafka
-        # 对应Java:
-        # kafkaTemplate.executeInTransaction(kt -> {
-        #     kt.send(kafkaConfig.getFileProcessingTopic(), task);
-        #     return true;
-        # });
-        
+         # 4. send to Kafka
         try:
-            # 获取producer（对应 @Autowired KafkaTemplate）
+            # get the producer
             producer = KafkaConfig.get_producer()
             
-            # 获取topic名称（对应 kafkaConfig.getFileProcessingTopic()）
+            # get the topic name
             topic = KafkaConfig.get_file_processing_topic()
             
             logger.info(
-                f"发送任务到Kafka: topic={topic}, "
+                f"Sending task to Kafka: topic={topic}, "
                 f"fileMd5={task.file_md5}, fileName={task.file_name}"
             )
             
-            # 发送消息
+            # send the message
             future = producer.send(
                 topic,
                 key=task.file_md5,
                 value=task.to_dict()
             )
             
-            # 同步等待发送完成（对应Java的事务提交）
+            # wait for the message to be sent
             record_metadata = future.get(timeout=10)
             
             logger.info(
-                f"任务发送成功: partition={record_metadata.partition}, "
+                f"Task sent successfully: partition={record_metadata.partition}, "
                 f"offset={record_metadata.offset}"
             )
 
         except Exception as kafka_error:
-            logger.error(f"Kafka发送失败: {kafka_error}", exc_info=True)
-            # 可以选择是否抛出异常
-            # 如果文件已合并，Kafka失败可能只记录日志
+            logger.error(f"Failed to send task to Kafka: {kafka_error}", exc_info=True)
 
         # Return success response with file info
         return {
