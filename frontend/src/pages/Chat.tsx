@@ -1,11 +1,19 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Send, User, Bot, Book, ChevronRight, ChevronDown } from 'lucide-react';
+import { useParams, useOutletContext } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import { chatApi, conversationApi } from '../api';
 import { ChatMessage, SearchResult } from '../types';
 import { clsx } from 'clsx';
 
+interface LayoutContext {
+  refreshConversations: () => void;
+}
+
 const Chat: React.FC = () => {
+  const { conversationId: urlConversationId } = useParams();
+  const { refreshConversations } = useOutletContext<LayoutContext>();
+  
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
@@ -16,7 +24,8 @@ const Chat: React.FC = () => {
     }
   ]);
   const [loading, setLoading] = useState(false);
-  const [conversationId] = useState(() => `conv_${Date.now()}`);
+  const [conversationId, setConversationId] = useState(() => urlConversationId || `conv_${Date.now()}`);
+  
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const currentMessageRef = useRef<string>('');
@@ -29,14 +38,62 @@ const Chat: React.FC = () => {
     scrollToBottom();
   }, [messages]);
 
+  // 当 URL 参数变化时更新会话 ID
+  useEffect(() => {
+    if (urlConversationId && urlConversationId !== conversationId) {
+      setConversationId(urlConversationId);
+    }
+  }, [urlConversationId, conversationId]);
+
+  // 加载历史会话
+  const loadConversationHistory = useCallback(async (convId: string) => {
+    try {
+      const response = await conversationApi.getHistory(convId);
+      if (response.data && response.data.length > 0) {
+        const loadedMessages: ChatMessage[] = response.data.map((msg, idx) => ({
+          id: `${convId}-${idx}`,
+          role: msg.role,
+          content: msg.content,
+          timestamp: msg.timestamp ? new Date(msg.timestamp).getTime() : Date.now()
+        }));
+        setMessages(loadedMessages);
+      } else {
+        setMessages([{
+          id: 'welcome',
+          role: 'assistant',
+          content: 'Hello! I am your AI study assistant. Ask me anything about your uploaded documents.',
+          timestamp: Date.now()
+        }]);
+      }
+    } catch (error) {
+      console.error('Failed to load conversation history:', error);
+      setMessages([{
+        id: 'welcome',
+        role: 'assistant',
+        content: 'Hello! I am your AI study assistant. Ask me anything about your uploaded documents.',
+        timestamp: Date.now()
+      }]);
+    }
+  }, []);
+
   // WebSocket 连接管理
   useEffect(() => {
-    // 创建 WebSocket 连接
+    // 关闭旧连接
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.close();
+    }
+
+    // 如果有 URL 参数，加载历史
+    if (urlConversationId) {
+      loadConversationHistory(urlConversationId);
+    }
+
+    // 创建新 WebSocket 连接
     const ws = chatApi.createWebSocket(conversationId);
     wsRef.current = ws;
 
     ws.onopen = () => {
-      console.log('✅ WebSocket connected');
+      console.log('✅ WebSocket connected:', conversationId);
     };
 
     ws.onmessage = (event) => {
@@ -56,10 +113,8 @@ const Chat: React.FC = () => {
         }
 
         if (data.chunk) {
-          // 流式响应块
           currentMessageRef.current += data.chunk;
           
-          // 更新最后一条消息（实时显示流式内容）
           setMessages(prev => {
             const newMessages = [...prev];
             const lastMsg = newMessages[newMessages.length - 1];
@@ -67,7 +122,6 @@ const Chat: React.FC = () => {
             if (lastMsg && lastMsg.role === 'assistant' && lastMsg.id === 'streaming') {
               lastMsg.content = currentMessageRef.current;
             } else {
-              // 创建新的流式消息
               newMessages.push({
                 id: 'streaming',
                 role: 'assistant',
@@ -81,14 +135,13 @@ const Chat: React.FC = () => {
         }
 
         if (data.type === 'completion' && data.status === 'finished') {
-          // 完成响应
           console.log('✅ Response completed');
           setMessages(prev => {
             const newMessages = [...prev];
             const lastMsg = newMessages[newMessages.length - 1];
             
             if (lastMsg && lastMsg.id === 'streaming') {
-              lastMsg.id = Date.now().toString(); // 给予正式 ID
+              lastMsg.id = Date.now().toString();
             }
             
             return newMessages;
@@ -96,6 +149,9 @@ const Chat: React.FC = () => {
           
           currentMessageRef.current = '';
           setLoading(false);
+          
+          // 刷新会话列表
+          refreshConversations?.();
         }
       } catch (error) {
         console.error('❌ Failed to parse WebSocket message:', error);
@@ -111,13 +167,12 @@ const Chat: React.FC = () => {
       console.log('🔌 WebSocket disconnected');
     };
 
-    // 清理函数
     return () => {
       if (ws.readyState === WebSocket.OPEN) {
         ws.close();
       }
     };
-  }, [conversationId]);
+  }, [conversationId, urlConversationId, loadConversationHistory, refreshConversations]);
 
   const handleSend = async () => {
     if (!input.trim() || loading) return;
@@ -135,8 +190,7 @@ const Chat: React.FC = () => {
     currentMessageRef.current = '';
 
     try {
-      // 通过 WebSocket 发送消息
-      if (wsRef.current) {
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
         chatApi.sendMessageViaWebSocket(wsRef.current, userMsg.content);
       } else {
         throw new Error('WebSocket not connected');
@@ -198,7 +252,6 @@ const Chat: React.FC = () => {
                 {msg.role === 'assistant' ? (
                   <ReactMarkdown
                     components={{
-                      // 自定义代码块样式
                       code: ({ node, className, children, ...props }) => {
                         const isInline = !className;
                         return isInline ? (
@@ -211,16 +264,12 @@ const Chat: React.FC = () => {
                           </code>
                         );
                       },
-                      // 自定义列表样式
                       ul: ({ children }) => <ul className="list-disc list-inside space-y-1 my-2">{children}</ul>,
                       ol: ({ children }) => <ol className="list-decimal list-inside space-y-1 my-2">{children}</ol>,
-                      // 自定义标题样式
                       h1: ({ children }) => <h1 className="text-lg font-bold mt-3 mb-2">{children}</h1>,
                       h2: ({ children }) => <h2 className="text-base font-bold mt-3 mb-2">{children}</h2>,
                       h3: ({ children }) => <h3 className="text-sm font-bold mt-2 mb-1">{children}</h3>,
-                      // 自定义段落样式
                       p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-                      // 自定义链接样式
                       a: ({ href, children }) => (
                         <a href={href} className="text-blue-600 hover:underline" target="_blank" rel="noopener noreferrer">
                           {children}
@@ -235,7 +284,7 @@ const Chat: React.FC = () => {
                 )}
               </div>
 
-              {/* RAG Sources (Only for assistant) */}
+              {/* RAG Sources */}
               {msg.sources && msg.sources.length > 0 && (
                 <div className="w-full mt-2">
                   <SourcesAccordion sources={msg.sources} />
@@ -248,7 +297,7 @@ const Chat: React.FC = () => {
             </div>
           </div>
         ))}
-        {loading && (
+        {loading && messages[messages.length - 1]?.id !== 'streaming' && (
           <div className="flex gap-4 max-w-4xl mx-auto">
             <div className="w-10 h-10 rounded-full bg-blue-600 flex items-center justify-center shrink-0">
               <Bot className="w-5 h-5 text-white" />
@@ -264,7 +313,7 @@ const Chat: React.FC = () => {
       </div>
 
       {/* Input Area */}
-      <div className="p-6 bg-white border-t border-gray-200">
+      <div className="p-4 bg-white border-t border-gray-200">
         <div className="max-w-4xl mx-auto relative">
           <textarea
             value={input}
@@ -287,11 +336,7 @@ const Chat: React.FC = () => {
             <Send className="w-4 h-4" />
           </button>
         </div>
-        <div className="text-center text-xs text-gray-400 mt-2 space-y-1">
-          <p className="text-gray-500">
-            💡 <span className="font-medium">Tip:</span> Use precise keywords for better results. 
-            Avoid filler words like "tell me about" or "what is".
-          </p>
+        <div className="text-center text-xs text-gray-400 mt-2">
           <p>AI can make mistakes. Check important info.</p>
         </div>
       </div>
@@ -337,7 +382,7 @@ const SourcesAccordion = ({ sources }: { sources: SearchResult[] }) => {
                 className="text-xs text-gray-600 leading-relaxed"
                 dangerouslySetInnerHTML={{ 
                   __html: source.highlights && source.highlights.length > 0 
-                    ? source.highlights[0] // 使用高亮片段
+                    ? source.highlights[0]
                     : source.text_content.substring(0, 150) + "..." 
                 }} 
               />
@@ -350,4 +395,3 @@ const SourcesAccordion = ({ sources }: { sources: SearchResult[] }) => {
 };
 
 export default Chat;
-

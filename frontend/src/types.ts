@@ -40,3 +40,12 @@ export interface ChatSession {
   messages: ChatMessage[];
   updated_at: number;
 }
+
+export interface Conversation {
+  conversation_id: string;
+  title: string;
+  message_count: number;
+  first_message_time: string | null;
+  last_message_time: string | null;
+  preview: string;
+}

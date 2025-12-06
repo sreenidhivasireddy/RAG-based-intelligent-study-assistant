@@ -142,6 +142,24 @@ export const chatApi = {
 
 // Conversation API
 export const conversationApi = {
+  // 获取所有会话列表
+  listAll: async () => {
+    const response = await api.get<{
+      code: number;
+      message: string;
+      data: Array<{
+        conversation_id: string;
+        title: string;
+        message_count: number;
+        first_message_time: string | null;
+        last_message_time: string | null;
+        preview: string;
+      }>;
+    }>('/conversations/');
+    
+    return response.data;
+  },
+
   // 获取对话历史
   getHistory: async (conversationId: string, startDate?: string, endDate?: string) => {
     const params = new URLSearchParams();

@@ -14,6 +14,105 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+@router.get("/")
+async def list_all_conversations():
+    """
+    获取所有会话列表
+    
+    返回示例:
+        {
+            "code": 200,
+            "message": "获取会话列表成功",
+            "data": [
+                {
+                    "conversation_id": "conv_123",
+                    "title": "什么是 RAG？",
+                    "message_count": 4,
+                    "last_message_time": "2025-01-01T10:00:00",
+                    "preview": "RAG（检索增强生成）是..."
+                },
+                ...
+            ]
+        }
+    """
+    try:
+        logger.info("📋 获取所有会话列表")
+        
+        # 获取所有 conversation:* 的 key
+        keys = redis_client.keys("conversation:*")
+        
+        conversations = []
+        for key in keys:
+            try:
+                # 提取 conversation_id
+                conv_id = key.replace("conversation:", "") if isinstance(key, str) else key.decode().replace("conversation:", "")
+                
+                # 获取会话内容
+                json_str = redis_client.get(key)
+                if not json_str:
+                    continue
+                
+                history = json.loads(json_str)
+                if not history:
+                    continue
+                
+                # 提取第一条用户消息作为标题
+                first_user_msg = next(
+                    (m for m in history if m.get("role") == "user"),
+                    None
+                )
+                title = first_user_msg.get("content", "New Conversation")[:50] if first_user_msg else "New Conversation"
+                if len(first_user_msg.get("content", "") if first_user_msg else "") > 50:
+                    title += "..."
+                
+                # 获取最后一条消息作为预览
+                last_msg = history[-1] if history else None
+                preview = ""
+                if last_msg:
+                    preview = last_msg.get("content", "")[:100]
+                    if len(last_msg.get("content", "")) > 100:
+                        preview += "..."
+                
+                # 获取时间戳
+                timestamps = [m.get("timestamp") for m in history if m.get("timestamp")]
+                
+                conversations.append({
+                    "conversation_id": conv_id,
+                    "title": title,
+                    "message_count": len(history),
+                    "first_message_time": timestamps[0] if timestamps else None,
+                    "last_message_time": timestamps[-1] if timestamps else None,
+                    "preview": preview
+                })
+            except Exception as e:
+                logger.warning(f"⚠️ 解析会话 {key} 失败: {e}")
+                continue
+        
+        # 按最后消息时间倒序排序
+        conversations.sort(
+            key=lambda x: x.get("last_message_time") or "",
+            reverse=True
+        )
+        
+        logger.info(f"✅ 返回 {len(conversations)} 个会话")
+        
+        return JSONResponse(
+            status_code=200,
+            content={
+                "code": 200,
+                "message": "获取会话列表成功",
+                "data": conversations
+            }
+        )
+    
+    except Exception as e:
+        logger.error(f"❌ 获取会话列表失败: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"服务器内部错误: {str(e)}"
+        )
+
+
 @router.get("/{conversation_id}")
 async def get_conversation_history(
     conversation_id: str,
@@ -49,7 +148,7 @@ async def get_conversation_history(
         
         # 从 Redis 获取历史
         key = f"conversation:{conversation_id}"
-        json_str = await redis_client.get(key)
+        json_str = redis_client.get(key)
         
         if not json_str:
             logger.info(f"⚠️ 会话 {conversation_id} 没有历史记录")
