@@ -1,4 +1,4 @@
-from typing import List, Dict, Callable, Optional
+from typing import List, Dict, Callable, Optional, Set
 from collections import defaultdict
 from uuid import uuid4
 import logging
@@ -8,6 +8,8 @@ import time
 from datetime import datetime, timedelta
 from app.clients.gpt_client import GPTClient
 from app.services.search import HybridSearchService
+from app.database import SessionLocal
+from app.repositories.upload_repository import get_file_upload
 import redis
 logger = logging.getLogger(__name__)
 
@@ -73,15 +75,19 @@ class ChatHandler:
                 query=user_message,
                 top_k=top_k
             )
-            # 3. 构建上下文
-            context = self._build_context(search_results)
             
-            # 4. 定义 WebSocket 推送回调
+            # 3. 查询文件名
+            file_name_cache = self._lookup_file_names(search_results)
+            
+            # 4. 构建上下文（包含文件名）
+            context, source_files = self._build_context(search_results, file_name_cache)
+            
+            # 5. 定义 WebSocket 推送回调
             async def send_chunk(chunk: str):
                 if websocket:
                     await websocket.send_json({"chunk": chunk})
             
-            # 5. 调用 LLM（异步）
+            # 6. 调用 LLM（异步）
             full_response = await self.llm_client.stream_response_async(
                 user_message=user_message,
                 context=context,
@@ -89,13 +95,14 @@ class ChatHandler:
                 on_chunk=lambda chunk: asyncio.create_task(send_chunk(chunk))
             )
             
-            # 6. 发送完成通知
+            # 7. 发送完成通知（包含源文件列表）
             if websocket:
                 await websocket.send_json({
                     "type": "completion",
                     "status": "finished",
-                    "message": "响应已完成",
-                    "timestamp": int(time.time() * 1000)
+                    "message": "Response completed",
+                    "timestamp": int(time.time() * 1000),
+                    "source_files": list(source_files)  # 返回使用的源文件列表
                 })
             
             # 7. 更新历史
@@ -185,21 +192,52 @@ class ChatHandler:
         except Exception as e:
             logger.error(f"更新对话历史失败: {e}", exc_info=True)
     
-    def _build_context(self, search_results: List[Dict]) -> str:
+    def _lookup_file_names(self, search_results: List[Dict]) -> Dict[str, str]:
         """
-        构建检索上下文
+        从数据库查询文件名
+        
+        Args:
+            search_results: 检索结果列表（包含 file_md5）
+            
+        Returns:
+            文件名缓存字典 {file_md5: file_name}
+        """
+        file_name_cache = {}
+        unique_md5s = set(r.get("file_md5") for r in search_results if r.get("file_md5"))
+        
+        if not unique_md5s:
+            return file_name_cache
+        
+        db = SessionLocal()
+        try:
+            for md5 in unique_md5s:
+                file_upload = get_file_upload(db, md5)
+                if file_upload:
+                    file_name_cache[md5] = file_upload.file_name
+        except Exception as e:
+            logger.error(f"查询文件名失败: {e}", exc_info=True)
+        finally:
+            db.close()
+        
+        return file_name_cache
+    
+    def _build_context(self, search_results: List[Dict], file_name_cache: Dict[str, str]) -> tuple[str, Set[str]]:
+        """
+        构建检索上下文，包含文件名信息
         
         Args:
             search_results: 检索结果列表
+            file_name_cache: 文件名缓存字典 {file_md5: file_name}
             
         Returns:
-            格式化的上下文字符串
+            (格式化的上下文字符串, 使用的源文件集合)
         """
         if not search_results:
-            return ""
+            return "", set()
         
         MAX_SNIPPET_LEN = 300
         context_parts = []
+        source_files = set()
         
         for i, result in enumerate(search_results, 1):
             # 提取文本内容
@@ -207,18 +245,25 @@ class ChatHandler:
             
             # 截断过长的片段
             if len(text_content) > MAX_SNIPPET_LEN:
-                text_content = text_content[:MAX_SNIPPET_LEN] + "…"
+                text_content = text_content[:MAX_SNIPPET_LEN] + "..."
             
-            # 提取文件名
-            file_name = result.get('file_name', result.get('fileName', 'unknown'))
+            # 获取文件名（优先从缓存，其次从结果，最后使用 unknown）
+            file_md5 = result.get('file_md5')
+            file_name = file_name_cache.get(file_md5) if file_md5 else None
+            if not file_name:
+                file_name = result.get('file_name', result.get('fileName', 'unknown'))
             
-            # 格式化：[序号] (文件名) 内容
-            context_parts.append(f"[{i}] ({file_name}) {text_content}")
+            # 添加到源文件集合
+            if file_name and file_name != 'unknown':
+                source_files.add(file_name)
+            
+            # 格式化：[序号] Source: file_name\nContent: text_content
+            context_parts.append(f"[{i}] Source: {file_name}\nContent: {text_content}")
         
         context = "\n".join(context_parts)
-        logger.debug(f"构建上下文完成，长度: {len(context)}")
+        logger.debug(f"构建上下文完成，长度: {len(context)}, 源文件数: {len(source_files)}")
         
-        return context
+        return context, source_files
 
     def clear_history(self):
         """清空当前会话的历史记录"""

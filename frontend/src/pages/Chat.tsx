@@ -135,13 +135,17 @@ const Chat: React.FC = () => {
         }
 
         if (data.type === 'completion' && data.status === 'finished') {
-          console.log('✅ Response completed');
+          console.log('✅ Response completed', data.source_files);
           setMessages(prev => {
             const newMessages = [...prev];
             const lastMsg = newMessages[newMessages.length - 1];
             
             if (lastMsg && lastMsg.id === 'streaming') {
               lastMsg.id = Date.now().toString();
+              // 添加源文件列表
+              if (data.source_files && data.source_files.length > 0) {
+                lastMsg.source_files = data.source_files;
+              }
             }
             
             return newMessages;
@@ -284,7 +288,14 @@ const Chat: React.FC = () => {
                 )}
               </div>
 
-              {/* RAG Sources */}
+              {/* RAG Source Files */}
+              {msg.source_files && msg.source_files.length > 0 && (
+                <div className="w-full mt-2">
+                  <SourceFilesList files={msg.source_files} />
+                </div>
+              )}
+              
+              {/* RAG Sources (detailed) */}
               {msg.sources && msg.sources.length > 0 && (
                 <div className="w-full mt-2">
                   <SourcesAccordion sources={msg.sources} />
@@ -338,6 +349,33 @@ const Chat: React.FC = () => {
         </div>
         <div className="text-center text-xs text-gray-400 mt-2">
           <p>AI can make mistakes. Check important info.</p>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Component to display source files list
+const SourceFilesList = ({ files }: { files: string[] }) => {
+  return (
+    <div className="border border-gray-200 rounded-lg bg-white overflow-hidden">
+      <div className="p-3 bg-gray-50">
+        <div className="flex items-center gap-2 text-xs font-medium text-gray-600">
+          <Book className="w-4 h-4 text-blue-500" />
+          <span>Sources: {files.length} file{files.length > 1 ? 's' : ''} used</span>
+        </div>
+      </div>
+      <div className="p-3 pt-2">
+        <div className="flex flex-wrap gap-2">
+          {files.map((file, idx) => (
+            <span
+              key={idx}
+              className="text-xs px-2 py-1 bg-blue-50 text-blue-700 rounded border border-blue-200 flex items-center gap-1"
+            >
+              <Book className="w-3 h-3" />
+              {file}
+            </span>
+          ))}
         </div>
       </div>
     </div>

@@ -30,7 +30,8 @@ export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
-  sources?: SearchResult[]; // RAG 特性：回答引用的来源
+  sources?: SearchResult[]; // RAG 特性：回答引用的来源（详细搜索结果）
+  source_files?: string[]; // RAG 特性：回答引用的源文件列表（文件名）
   timestamp: number;
 }
 

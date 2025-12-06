@@ -39,10 +39,10 @@ class GPTClient:
         self.temperature = float(os.getenv("GPT_TEMPERATURE", "0.7"))
         self.top_p = float(os.getenv("GPT_TOP_P", "0.95"))
         self.max_tokens = int(os.getenv("GPT_MAX_TOKENS", "2000"))
-        self.rules = os.getenv("GPT_SYSTEM_RULES", "你是派聪明知识助手，请基于提供的参考信息准确回答用户问题。")
+        self.rules = os.getenv("GPT_SYSTEM_RULES", "You are PaiSmart knowledge assistant. Please answer user questions accurately based on the provided reference information. When citing sources, mention the source file names clearly.")
         self.ref_start = os.getenv("GPT_REF_START", "<<REF>>")
         self.ref_end = os.getenv("GPT_REF_END", "<<END>>")
-        self.no_result_text = os.getenv("GPT_NO_RESULT_TEXT", "（本轮无检索结果）")
+        self.no_result_text = os.getenv("GPT_NO_RESULT_TEXT", "(No retrieval results for this round)")
         
         # 初始化客户端
         client_kwargs = {"api_key": self.api_key}
