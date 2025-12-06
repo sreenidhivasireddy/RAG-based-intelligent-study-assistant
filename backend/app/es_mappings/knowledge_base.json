@@ -13,8 +13,8 @@
       },
       "text_content": {
         "type": "text",
-        "analyzer": "icu_analyzer",
-        "search_analyzer": "icu_analyzer"
+        "analyzer": "ik_smart",
+        "search_analyzer": "ik_smart"
       },
       "vector": {
         "type": "dense_vector",

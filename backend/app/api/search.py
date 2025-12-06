@@ -17,7 +17,7 @@ from app.schemas.search import (
     AnalyzeResponse
 )
 from app.services.search import HybridSearchService
-from app.services.elasticsearch_searvice import ElasticsearchService
+from app.services.es_service import ElasticsearchService
 from app.clients.elastic import es_client
 from app.clients.gemini_embedding_client import GeminiEmbeddingClient
 from app.core.search_config import search_config
