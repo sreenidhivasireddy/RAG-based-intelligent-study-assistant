@@ -158,11 +158,16 @@ class FileProcessingConsumer:
             finally:
                 db.close()
             
-            # 3. vectorize the file
+            # 3. vectorize the file (使用新的 db session 以确保能读取到刚解析的数据)
             logger.info(f"Vectorizing file: fileMd5={task.file_md5}")
+            vectorize_db = SessionLocal()
+            try:
             self.vectorization_service.vectorize(
-                file_md5=task.file_md5
+                    file_md5=task.file_md5,
+                    db=vectorize_db
             )
+            finally:
+                vectorize_db.close()
             logger.info(f"Vectorization completed, fileMd5: {task.file_md5}")
             logger.info(f"Update file status to completed: fileMd5={task.file_md5}")
             update_file_status(db, task.file_md5, status=1)

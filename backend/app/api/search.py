@@ -22,6 +22,8 @@ from app.clients.elastic import es_client
 from app.clients.gemini_embedding_client import GeminiEmbeddingClient
 from app.core.search_config import search_config
 from app.utils.logging import get_logger
+from app.database import SessionLocal
+from app.repositories.upload_repository import get_file_upload
 
 router = APIRouter(prefix="/search", tags=["search"])
 logger = get_logger(__name__)
@@ -103,13 +105,34 @@ async def search_knowledge_base(request: SearchRequest):
                 detail=f"Invalid search_mode: {request.search_mode}"
             )
         
-        # Convert to response format
+        # Look up file names from MySQL
+        file_name_cache = {}
+        unique_md5s = set(r["file_md5"] for r in results if r.get("file_md5"))
+        
+        if unique_md5s:
+            db = SessionLocal()
+            try:
+                for md5 in unique_md5s:
+                    file_upload = get_file_upload(db, md5)
+                    if file_upload:
+                        file_name_cache[md5] = file_upload.file_name
+            finally:
+                db.close()
+        
+        # Normalize scores to 0-1 range (for display as 0-100%)
+        # Hybrid search raw scores typically range 0.5~1.2
+        # Simply cap at 1.0 to ensure never exceeds 100%
+        def normalize_score(raw_score: float) -> float:
+            return min(raw_score, 1.0)
+        
+        # Convert to response format with file names and normalized scores
         search_results = [
             SearchResult(
                 file_md5=r["file_md5"],
+                file_name=file_name_cache.get(r["file_md5"]),
                 chunk_id=r["chunk_id"],
                 text_content=r["text_content"],
-                score=r["score"],
+                score=normalize_score(r["score"]),  # Map to 0-1 range
                 highlights=r.get("highlights", []),
                 model_version=r.get("model_version")
             )

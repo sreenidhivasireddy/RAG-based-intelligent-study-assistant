@@ -116,11 +116,10 @@ def step_vectorize(expected_chunk_count):
 
     service = VectorizationService(
         embedding_client=embedding,
-        elasticsearch_service=es_service,
-        db=db
+        elasticsearch_service=es_service
     )
 
-    service.vectorize(TEST_FILE_MD5)
+    service.vectorize(TEST_FILE_MD5, db=db)
 
     print("✓ Vectorization completed")
     db.close()

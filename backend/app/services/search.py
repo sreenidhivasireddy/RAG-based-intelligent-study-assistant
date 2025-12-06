@@ -7,6 +7,7 @@ Supports multi-field text indexing for Chinese and English content.
 from typing import List, Dict, Tuple, Optional
 from elasticsearch import Elasticsearch
 import time
+import re
 
 from app.clients.gemini_embedding_client import GeminiEmbeddingClient
 from app.core.search_config import search_config
@@ -59,14 +60,27 @@ class HybridSearchService:
         """
         # Technical terms that need precise matching
         technical_terms = [
+            # ML/DL frameworks and tools
             "PyTorch", "TensorFlow", "Keras", "API", "GPU", "CUDA",
             "Transformer", "BERT", "GPT", "Adam", "SGD", "ReLU",
             "CNN", "RNN", "LSTM", "ResNet", "VGG", "BatchNorm",
-            "Dropout", "Softmax", "CrossEntropy", "MSE", "MAE"
+            "Dropout", "Softmax", "CrossEntropy", "MSE", "MAE",
+            # NLP/Linguistics terms
+            "NLP", "natural language processing", "context free grammar", "CFG", 
+            "finite state machine", "FSM", "regular expression", "regex", 
+            "parse tree", "syntax tree", "morphology", "tokenization", 
+            "lemmatization", "stemming", "POS tagging", "named entity", "NER", 
+            "dependency parsing", "constituency", "BNF", "Chomsky", 
+            "n-gram", "bigram", "trigram", "word embedding", "word2vec",
+            "TF-IDF", "bag of words", "language model", "seq2seq"
         ]
         
-        # Check for technical terms (case-sensitive for proper nouns)
-        has_technical = any(term in query for term in technical_terms)
+        # Check for technical terms (case-insensitive for phrases, case-sensitive for acronyms)
+        query_lower = query.lower()
+        has_technical = any(
+            term.lower() in query_lower if len(term) > 3 else term in query
+            for term in technical_terms
+        )
         
         # Check for question patterns
         question_words = ["how", "what", "why", "when", "where", "which",
@@ -76,14 +90,25 @@ class HybridSearchService:
         # Check query length (longer queries often need semantic understanding)
         is_long = len(query) > 50
         
-        # Dynamic adjustment
-        if has_technical:
-            logger.info(f"Auto-adjust: Technical terms detected, boosting BM25")
-            return 0.3, 0.7
+        # Dynamic adjustment with combined logic
+        # 组合判断：同时考虑技术术语和问句特征
+        if has_technical and (is_question or is_long):
+            # 长句子/问句 + 专业术语 → 平衡但偏向 BM25
+            # 例如: "How does context free grammar work?"
+            logger.info(f"Auto-adjust: Technical question detected, balanced with BM25 bias (0.35/0.65)")
+            return 0.35, 0.65
+        elif has_technical:
+            # 纯技术术语查询 → 重 BM25
+            # 例如: "context free grammar"
+            logger.info(f"Auto-adjust: Technical terms detected, boosting BM25 (0.2/0.8)")
+            return 0.2, 0.8
         elif is_question or is_long:
-            logger.info(f"Auto-adjust: Semantic query detected, boosting KNN")
+            # 一般性问句/长查询 → 重 KNN (语义理解)
+            # 例如: "How to improve model performance?"
+            logger.info(f"Auto-adjust: Semantic query detected, boosting KNN (0.7/0.3)")
             return 0.7, 0.3
         else:
+            # 默认平衡
             return 0.5, 0.5
     
     def _build_multifield_query(self, query: str) -> List[Dict]:
@@ -91,9 +116,11 @@ class HybridSearchService:
         Build multi-field BM25 query clauses.
         
         Searches across:
-        - textContent: Main field with Chinese analyzer (IK)
-        - textContent.english: Sub-field with English stemming
-        - textContent.standard: Sub-field with standard tokenizer
+        - text_content: Main field with Chinese analyzer (IK)
+        - text_content.english: Sub-field with English stemming
+        - text_content.standard: Sub-field with standard tokenizer
+        
+        Also adds phrase matching for multi-word queries to boost exact matches.
         
         Args:
             query: Search query text
@@ -103,35 +130,74 @@ class HybridSearchService:
         """
         field_boosts = search_config.get_field_boosts()
         
+        # 过滤停用词后的查询 - 用于更精确的匹配
+        filtered_query = self._filter_stopwords(query)
+        filtered_word_count = len(filtered_query.split())
+        
+        # 根据查询长度调整匹配策略
+        # 短查询（<5词）：严格匹配 50%
+        # 长查询（≥5词）：宽松匹配，至少匹配 2 个关键词
+        if filtered_word_count < 5:
+            min_match = "50%"
+        else:
+            min_match = "2"  # 长查询只需匹配至少 2 个词
+        
+        logger.debug(f"Query length: {filtered_word_count} words, minimum_should_match: {min_match}")
+        
         clauses = [
             # Chinese field (main field with IK analyzer)
             {
                 "match": {
-                    "textContent": {
-                        "query": query,
-                        "boost": field_boosts["chinese"]
+                    "text_content": {
+                        "query": filtered_query,  # 使用过滤后的查询
+                        "boost": field_boosts["chinese"],
+                        "minimum_should_match": min_match
                     }
                 }
             },
             # English field (with stemming)
             {
                 "match": {
-                    "textContent.english": {
-                        "query": query,
-                        "boost": field_boosts["english"]
+                    "text_content.english": {
+                        "query": filtered_query,
+                        "boost": field_boosts["english"],
+                        "minimum_should_match": min_match
                     }
                 }
             },
-            # Standard field (fallback)
+            # Standard field (fallback) - 使用原查询作为兜底
             {
                 "match": {
-                    "textContent.standard": {
+                    "text_content.standard": {
                         "query": query,
                         "boost": field_boosts["standard"]
                     }
                 }
             }
         ]
+        
+        # 添加短语匹配：如果过滤后的查询包含多个词，增加精确短语匹配提升
+        filtered_words = filtered_query.split()
+        if len(filtered_words) >= 2:
+            # 短语匹配 - 大幅提升包含完整短语的文档
+            clauses.append({
+                "match_phrase": {
+                    "text_content": {
+                        "query": filtered_query,
+                        "boost": 3.0,  # 短语匹配权重是普通匹配的3倍
+                        "slop": 2      # 允许词之间有2个词的间隔
+                    }
+                }
+            })
+            clauses.append({
+                "match_phrase": {
+                    "text_content.english": {
+                        "query": filtered_query,
+                        "boost": 2.5,
+                        "slop": 2
+                    }
+                }
+            })
         
         return clauses
     
@@ -145,27 +211,120 @@ class HybridSearchService:
         Returns:
             List containing single match clause
         """
-        return [
+        # 过滤停用词
+        filtered_query = self._filter_stopwords(query)
+        filtered_word_count = len(filtered_query.split())
+        
+        # 根据查询长度调整匹配策略
+        if filtered_word_count < 5:
+            min_match = "50%"
+        else:
+            min_match = "2"
+        
+        clauses = [
             {
                 "match": {
-                    "textContent": {
-                        "query": query,
-                        "boost": 1.0
+                    "text_content": {
+                        "query": filtered_query,
+                        "boost": 1.0,
+                        "minimum_should_match": min_match
                     }
                 }
             }
         ]
     
-    def _build_highlight_config(self) -> Dict:
+        # 添加短语匹配
+        if filtered_word_count >= 2:
+            clauses.append({
+                "match_phrase": {
+                    "text_content": {
+                        "query": filtered_query,
+                        "boost": 3.0,
+                        "slop": 2
+                    }
+                }
+            })
+        
+        return clauses
+    
+    def _get_plural_variants(self, query: str) -> List[str]:
+        """
+        Get plural/singular variants of terms in query for highlighting.
+        
+        Args:
+            query: Query text
+            
+        Returns:
+            List of plural/singular variants to highlight
+        """
+        variants = []
+        words = re.findall(r'\b\w+\b', query)  # Extract words from query
+        
+        for word in words:
+            if len(word) >= 2:  # Skip single characters
+                if word.endswith('s') and len(word) > 2:
+                    # Add singular form (remove 's')
+                    variants.append(word[:-1])
+                else:
+                    # Add plural form (add 's')
+                    variants.append(word + 's')
+        
+        return list(set(variants))  # Remove duplicates
+    
+    def _filter_stopwords(self, query: str) -> str:
+        """
+        Filter out common stop words from query for better highlighting.
+        
+        Args:
+            query: Original query text
+            
+        Returns:
+            Query with stop words removed
+        """
+        # Common English stop words that shouldn't be highlighted
+        stop_words = {
+            # Question words
+            "how", "what", "why", "when", "where", "which", "who", "whom",
+            # Common verbs
+            "is", "are", "was", "were", "be", "been", "being",
+            "do", "does", "did", "doing", "done",
+            "have", "has", "had", "having",
+            "can", "could", "will", "would", "shall", "should", "may", "might", "must",
+            "work", "works", "working", "worked",
+            # Articles and prepositions
+            "a", "an", "the", "in", "on", "at", "to", "for", "of", "with", "by", "from",
+            "about", "into", "through", "during", "before", "after", "above", "below",
+            # Conjunctions
+            "and", "or", "but", "if", "then", "else", "so", "because",
+            # Pronouns
+            "i", "you", "he", "she", "it", "we", "they", "me", "him", "her", "us", "them",
+            "this", "that", "these", "those",
+            # Others
+            "not", "no", "yes", "all", "any", "some", "more", "most", "other", "such",
+            # Additional common words
+            "as"
+        }
+        
+        # 移除标点符号并过滤停用词
+        words = re.findall(r'\b\w+\b', query)  # 只提取单词，去除标点
+        filtered = [w for w in words if w.lower() not in stop_words]
+        
+        return " ".join(filtered) if filtered else query
+    
+    def _build_highlight_config(self, query: str = None) -> Dict:
         """
         Build highlight configuration for search results.
+        Only highlights meaningful terms (filters out stop words).
+        
+        Args:
+            query: Original query for custom highlight query
         
         Returns:
             Dictionary containing highlight settings
         """
         highlight_config = {
             "fields": {
-                "textContent": {
+                "text_content": {
                     "pre_tags": ["<mark>"],
                     "post_tags": ["</mark>"],
                     "fragment_size": search_config.HIGHLIGHT_FRAGMENT_SIZE,
@@ -176,11 +335,34 @@ class HybridSearchService:
         
         # Add multi-field highlights if enabled
         if search_config.MULTIFIELD_ENABLED:
-            highlight_config["fields"]["textContent.english"] = {
+            highlight_config["fields"]["text_content.english"] = {
                 "pre_tags": ["<mark>"],
                 "post_tags": ["</mark>"],
                 "fragment_size": search_config.HIGHLIGHT_FRAGMENT_SIZE,
                 "number_of_fragments": search_config.HIGHLIGHT_FRAGMENTS
+            }
+        
+        # Use filtered query for highlighting (removes stop words)
+        # Also add plural/singular variants (e.g., CFG → CFGs)
+        if query:
+            filtered_query = self._filter_stopwords(query)
+            plural_variants = self._get_plural_variants(query)
+            
+            # Build highlight query with filtered terms + expanded abbreviations
+            should_clauses = [
+                {"match": {"text_content": filtered_query}},
+                {"match": {"text_content.english": filtered_query}}
+            ]
+            
+            # Add plural/singular variants
+            for term in plural_variants:
+                should_clauses.append({"match_phrase": {"text_content": term}})
+                should_clauses.append({"match_phrase": {"text_content.english": term}})
+            
+            highlight_config["highlight_query"] = {
+                "bool": {
+                    "should": should_clauses
+                    }
             }
         
         return highlight_config
@@ -262,20 +444,22 @@ class HybridSearchService:
                         }
                     },
                     "script": {
-                        # RRF-style fusion scoring
+                        # RRF-style fusion scoring with phrase boost awareness
                         "source": """
                             // KNN: Cosine similarity (range: 0-2 after +1)
                             double knn_score = cosineSimilarity(params.query_vector, 'vector') + 1.0;
                             
-                            // BM25: Multi-field best match score
+                            // BM25: Multi-field best match score (includes phrase match boost)
                             double bm25_score = _score;
                             
                             // RRF-style fusion
                             // KNN contribution: direct weighted score
                             double knn_contribution = params.knn_weight * knn_score;
                             
-                            // BM25 contribution: normalized to prevent dominance
-                            double bm25_contribution = params.bm25_weight * (bm25_score / (params.rrf_k + bm25_score));
+                            // BM25 contribution: use log scaling to preserve phrase match advantage
+                            // Higher BM25 scores (from phrase matches) will have proportionally more impact
+                            double bm25_normalized = Math.log1p(bm25_score) / Math.log1p(params.rrf_k);
+                            double bm25_contribution = params.bm25_weight * bm25_normalized;
                             
                             // Final combined score
                             return knn_contribution + bm25_contribution;
@@ -289,17 +473,17 @@ class HybridSearchService:
                     }
                 }
             },
-            "_source": ["fileMd5", "chunkId", "textContent", "modelVersion"]
+            "_source": ["file_md5", "chunk_id", "text_content", "model_version"]
         }
         
         # Add highlighting if enabled
         if search_config.HIGHLIGHT_ENABLED:
-            search_body["highlight"] = self._build_highlight_config()
+            search_body["highlight"] = self._build_highlight_config(query)
         
         # Add file filter if specified
         if file_md5_filter:
             search_body["query"]["script_score"]["query"]["bool"]["filter"].append({
-                "term": {"fileMd5": file_md5_filter}
+                "term": {"file_md5": file_md5_filter}
             })
         
         # Step 4: Execute search
@@ -317,12 +501,12 @@ class HybridSearchService:
                     highlights.extend(frags)
             
             result = {
-                "file_md5": source.get("fileMd5"),
-                "chunk_id": source.get("chunkId"),
-                "text_content": source.get("textContent"),
+                "file_md5": source.get("file_md5"),
+                "chunk_id": source.get("chunk_id"),
+                "text_content": source.get("text_content"),
                 "score": hit["_score"],
                 "highlights": highlights,
-                "model_version": source.get("modelVersion")
+                "model_version": source.get("model_version")
             }
             results.append(result)
         
@@ -377,25 +561,25 @@ class HybridSearchService:
                     }
                 }
             },
-            "_source": ["fileMd5", "chunkId", "textContent", "modelVersion"]
+            "_source": ["file_md5", "chunk_id", "text_content", "model_version"]
         }
         
         # Add file filter if specified
         if file_md5_filter:
             search_body["query"]["script_score"]["query"] = {
-                "term": {"fileMd5": file_md5_filter}
+                "term": {"file_md5": file_md5_filter}
             }
         
         response = self.es.search(index=self.index_name, body=search_body)
         
         results = [
             {
-                "file_md5": hit["_source"]["fileMd5"],
-                "chunk_id": hit["_source"]["chunkId"],
-                "text_content": hit["_source"]["textContent"],
+                "file_md5": hit["_source"]["file_md5"],
+                "chunk_id": hit["_source"]["chunk_id"],
+                "text_content": hit["_source"]["text_content"],
                 "score": hit["_score"],
                 "highlights": [],
-                "model_version": hit["_source"].get("modelVersion")
+                "model_version": hit["_source"].get("model_version")
             }
             for hit in response["hits"]["hits"]
         ]
@@ -439,9 +623,9 @@ class HybridSearchService:
                 "multi_match": {
                     "query": query,
                     "fields": [
-                        f"textContent^{field_boosts['chinese']}",
-                        f"textContent.english^{field_boosts['english']}",
-                        f"textContent.standard^{field_boosts['standard']}"
+                        f"text_content^{field_boosts['chinese']}",
+                        f"text_content.english^{field_boosts['english']}",
+                        f"text_content.standard^{field_boosts['standard']}"
                     ],
                     "type": "best_fields",
                     "tie_breaker": field_boosts["tie_breaker"],
@@ -451,7 +635,7 @@ class HybridSearchService:
         else:
             query_clause = {
                 "match": {
-                    "textContent": {
+                    "text_content": {
                         "query": query,
                         "operator": "or"
                     }
@@ -466,17 +650,17 @@ class HybridSearchService:
                     "filter": []
                 }
             },
-            "_source": ["fileMd5", "chunkId", "textContent", "modelVersion"]
+            "_source": ["file_md5", "chunk_id", "text_content", "model_version"]
         }
         
         # Add highlighting
         if search_config.HIGHLIGHT_ENABLED:
-            search_body["highlight"] = self._build_highlight_config()
+            search_body["highlight"] = self._build_highlight_config(query)
         
         # Add file filter if specified
         if file_md5_filter:
             search_body["query"]["bool"]["filter"].append({
-                "term": {"fileMd5": file_md5_filter}
+                "term": {"file_md5": file_md5_filter}
             })
         
         response = self.es.search(index=self.index_name, body=search_body)
@@ -489,12 +673,12 @@ class HybridSearchService:
                     highlights.extend(frags)
             
             results.append({
-                "file_md5": hit["_source"]["fileMd5"],
-                "chunk_id": hit["_source"]["chunkId"],
-                "text_content": hit["_source"]["textContent"],
+                "file_md5": hit["_source"]["file_md5"],
+                "chunk_id": hit["_source"]["chunk_id"],
+                "text_content": hit["_source"]["text_content"],
                 "score": hit["_score"],
                 "highlights": highlights,
-                "model_version": hit["_source"].get("modelVersion")
+                "model_version": hit["_source"].get("model_version")
             })
         
         elapsed = (time.time() - start_time) * 1000

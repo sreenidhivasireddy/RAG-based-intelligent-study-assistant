@@ -465,7 +465,7 @@ class E2ESearchTester:
             # First, get a sample file_md5 from existing documents
             resp = self.es.search(
                 index=self.config.ES_INDEX,
-                body={"size": 1, "_source": ["fileMd5"]},
+                body={"size": 1, "_source": ["file_md5"]},
             )
             
             hits = resp.get("hits", {}).get("hits", [])
@@ -473,7 +473,7 @@ class E2ESearchTester:
                 print_warn("No documents to test file filter")
                 return True
             
-            file_md5 = hits[0]["_source"]["fileMd5"]
+            file_md5 = hits[0]["_source"]["file_md5"]
             print_info(f"Testing with file_md5: {file_md5[:16]}...")
             
             # Search with filter

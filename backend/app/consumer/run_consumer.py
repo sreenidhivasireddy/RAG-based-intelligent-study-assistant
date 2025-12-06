@@ -16,7 +16,6 @@ from pathlib import Path
 # 确保能导入 app 模块
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from app.database import SessionLocal
 from app.services.parse_service import ParseService
 from app.services.vectorize_service import VectorizationService
 from app.services.es_service import ElasticsearchService
@@ -36,15 +35,10 @@ def main():
     logger.info("🚀 Starting File Processing Kafka Consumer")
     logger.info("=" * 80)
     
-    db = None
     consumer = None
     
     try:
-        # 1. initialize the database connection
-        logger.info("Initializing database connection...")
-        db = SessionLocal()
-        
-        # 2. initialize the parse service
+        # 1. initialize the parse service
         logger.info("Initializing parse service...")
         parse_service = ParseService(chunk_size=500)
         
@@ -66,8 +60,7 @@ def main():
         logger.info("Initializing vectorization service...")
         vectorization_service = VectorizationService(
             embedding_client=embedding_client,
-            elasticsearch_service=es_service,
-            db=db
+            elasticsearch_service=es_service
         )
         
         # 6. create the Kafka Consumer
@@ -108,13 +101,6 @@ def main():
                 logger.info("✓ Kafka Consumer closed")
             except Exception as e:
                 logger.error(f"Error closing consumer: {e}")
-        
-        if db:
-            try:
-                db.close()
-                logger.info("✓ Database connection closed")
-            except Exception as e:
-                logger.error(f"Error closing database: {e}")
         
         logger.info("=" * 80)
         logger.info("Consumer stopped")
