@@ -216,7 +216,7 @@ async def clear_conversation_history(conversation_id: str):
         logger.info(f"🗑️ 清空对话历史，会话ID: {conversation_id}")
         
         key = f"conversation:{conversation_id}"
-        deleted = await redis_client.delete(key)
+        deleted = redis_client.delete(key)
         
         if deleted:
             logger.info(f"✅ 会话 {conversation_id} 的历史已清空")
@@ -257,7 +257,7 @@ async def get_conversation_summary(conversation_id: str):
     """
     try:
         key = f"conversation:{conversation_id}"
-        json_str = await redis_client.get(key)
+        json_str = redis_client.get(key)
         
         if not json_str:
             return JSONResponse(
