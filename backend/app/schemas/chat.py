@@ -1,1 +1,0 @@
-# Chat related DTOs
