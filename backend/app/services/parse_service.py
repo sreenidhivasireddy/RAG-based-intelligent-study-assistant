@@ -52,6 +52,41 @@ logger.info(
 
 
 # ============================================================
+# Text Cleaning Utility
+# ============================================================
+def clean_text(text: str) -> str:
+    """
+    Clean text by removing invalid Unicode characters and control characters.
+    Fixes garbled characters (�) from PDF extraction.
+    """
+    if not text:
+        return ""
+    
+    # Remove Unicode replacement character (�)
+    text = text.replace('\ufffd', '')
+    
+    # Remove other common problematic characters
+    text = text.replace('\x00', '')  # Null character
+    
+    # Remove control characters (except newline, tab, carriage return)
+    text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]', '', text)
+    
+    # Remove private use area characters (often used for custom fonts in PDFs)
+    text = re.sub(r'[\ue000-\uf8ff]', '', text)
+    
+    # Remove surrogate characters
+    text = re.sub(r'[\ud800-\udfff]', '', text)
+    
+    # Normalize multiple spaces to single space
+    text = re.sub(r' +', ' ', text)
+    
+    # Normalize multiple newlines to double newline
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    
+    return text.strip()
+
+
+# ============================================================
 # Streaming PDF Parser (by page)
 # ============================================================
 class PdfTextIterator:
@@ -69,7 +104,8 @@ class PdfTextIterator:
         
         text = self.pages[self.index].extract_text() or ""
         self.index += 1
-        return text
+        # Clean the extracted text to remove garbled characters
+        return clean_text(text)
 
 # ============================================================
 # Streaming DOCX Parser (by paragraph)
@@ -89,7 +125,8 @@ class DocxTextIterator:
         
         text = self.paragraphs[self.index].text or ""
         self.index += 1
-        return text
+        # Clean the extracted text
+        return clean_text(text)
 
 # ============================================================
 # Streaming TXT Parser (by line)
@@ -106,7 +143,9 @@ class PlainTextIterator:
         data = self.stream.read(self.buffer_size)
         if not data:
             raise StopIteration
-        return data.decode("utf-8", errors="ignore") 
+        text = data.decode("utf-8", errors="ignore")
+        # Clean the extracted text
+        return clean_text(text) 
 
 class ParseService:
     """

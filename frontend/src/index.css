@@ -1,0 +1,32 @@
+@import "tailwindcss";
+
+/* Tailwind v4 不再需要 base/components/utilities 分层指令，只需要这一行 */
+
+@layer base {
+  html, body {
+    /* 注意：v4 默认开启了 reset，这里可以简化 */
+    @apply h-full w-full text-gray-900 antialiased;
+  }
+  
+  #root {
+    @apply h-full w-full;
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-gray-200 rounded-full;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-gray-300;
+}

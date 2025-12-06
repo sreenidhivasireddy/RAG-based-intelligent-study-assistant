@@ -8,6 +8,7 @@ A backend service for an intelligent study assistant powered by RAG (Retrieval-A
 - [Tech Stack](#️-tech-stack)
 - [Architecture](#️-architecture)
 - [Quick Start](#-quick-start)
+- [Web UI & Console Access](#-web-ui--console-access)
 - [API Documentation](#-api-documentation)
 - [Testing Guide](#-testing-guide)
 - [Logging](#-logging)
@@ -216,6 +217,68 @@ uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 The server will start at:
 - **API Documentation (Swagger UI)**: http://127.0.0.1:8000/docs
 - **API Documentation (ReDoc)**: http://127.0.0.1:8000/redoc
+
+## 🌐 Web UI & Console Access
+
+After starting all services, you can access the following web interfaces:
+
+### FastAPI (Backend API)
+| Interface | URL | Description |
+|-----------|-----|-------------|
+| **Swagger UI** | http://127.0.0.1:8000/docs | Interactive API documentation (recommended) |
+| **ReDoc** | http://127.0.0.1:8000/redoc | Alternative API documentation |
+| **OpenAPI JSON** | http://127.0.0.1:8000/openapi.json | Raw OpenAPI specification |
+
+### MinIO (Object Storage)
+| Interface | URL | Description |
+|-----------|-----|-------------|
+| **Console** | http://127.0.0.1:9001 | Web management console |
+| **API Endpoint** | http://127.0.0.1:9000 | S3-compatible API |
+
+Default credentials:
+- Username: `minioadmin`
+- Password: `minioadmin`
+
+### Elasticsearch
+| Interface | URL | Description |
+|-----------|-----|-------------|
+| **Cluster Info** | http://127.0.0.1:9200 | Cluster health and info |
+| **Index Stats** | http://127.0.0.1:9200/_cat/indices?v | List all indices |
+| **Kibana** | http://127.0.0.1:5601 | Visual dashboard (if installed) |
+
+### Redis
+Redis doesn't have a built-in web UI, but you can use:
+
+```bash
+# Command line interface
+redis-cli
+
+# Common commands
+redis-cli ping          # Test connection
+redis-cli info          # Server info
+redis-cli keys "*"      # List all keys (use carefully in production)
+```
+
+Or install a GUI tool:
+- **RedisInsight** (official): https://redis.com/redis-enterprise/redis-insight/
+- **Another Redis Desktop Manager**: https://github.com/qishibo/AnotherRedisDesktopManager
+
+### Kafka
+| Interface | URL | Description |
+|-----------|-----|-------------|
+| **Kafka UI** | http://127.0.0.1:8080 | Web UI (if kafka-ui is installed) |
+
+Kafka command line tools:
+```bash
+# List topics
+kafka-topics --bootstrap-server localhost:9092 --list
+
+# Describe topic
+kafka-topics --bootstrap-server localhost:9092 --describe --topic <topic-name>
+
+# Console consumer (view messages)
+kafka-console-consumer --bootstrap-server localhost:9092 --topic <topic-name> --from-beginning
+```
 
 ## 📚 API Documentation
 
