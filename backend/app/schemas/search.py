@@ -114,6 +114,7 @@ class SearchResult(BaseModel):
     
     Attributes:
         file_md5: Source file MD5 hash
+        file_name: Source file name (looked up from database)
         chunk_id: Text chunk ID within the file
         text_content: Content of the matched text chunk
         score: Relevance score (higher = more relevant)
@@ -122,6 +123,7 @@ class SearchResult(BaseModel):
     """
     
     file_md5: str = Field(..., description="File MD5 hash")
+    file_name: Optional[str] = Field(None, description="Source file name")
     chunk_id: int = Field(..., description="Text chunk ID")
     text_content: str = Field(..., description="Content text")
     score: float = Field(..., description="Relevance score")

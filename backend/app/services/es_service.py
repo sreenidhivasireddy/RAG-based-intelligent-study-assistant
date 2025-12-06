@@ -132,7 +132,7 @@ class ElasticsearchService:
         """
         try:
             if file_md5:
-                query = {"query": {"term": {"fileMd5": file_md5}}}
+                query = {"query": {"term": {"file_md5": file_md5}}}
             else:
                 query = {"query": {"match_all": {}}}
             

@@ -23,16 +23,15 @@ class VectorizationService:
     def __init__(
         self,
         embedding_client: GeminiEmbeddingClient,
-        elasticsearch_service: ElasticsearchService,
-        db: Session
+        elasticsearch_service: ElasticsearchService
     ):
         self.embedding_client = embedding_client
         self.elasticsearch_service = elasticsearch_service
-        self.db = db
     
     def vectorize(
         self, 
-        file_md5: str
+        file_md5: str,
+        db: Session
     ) -> None:
         """
         Execute vectorization operation
@@ -46,7 +45,7 @@ class VectorizationService:
         try:
             print("DEBUG: USING VECTORIZE VERSION WITH BULK INDEX")
             # 1. Get file chunks
-            chunks = self._fetch_text_chunks(file_md5)
+            chunks = self._fetch_text_chunks(file_md5, db)
             if not chunks:
                 logger.warning(f"No chunks found for fileMd5: {file_md5}")
                 return
@@ -95,18 +94,19 @@ class VectorizationService:
             logger.error(f"Vectorization failed, fileMd5: {file_md5}", exc_info=True)
             raise RuntimeError(f"Vectorization failed: {str(e)}") from e
     
-    def _fetch_text_chunks(self, file_md5: str) -> List[TextChunk]:
+    def _fetch_text_chunks(self, file_md5: str, db: Session) -> List[TextChunk]:
         """
         Get file chunks from database
         
         Args:
             file_md5: file fingerprint
+            db: database session
             
         Returns:
             List of text chunks
         """
         # Call Repository to query data
-        vectors = document_vector_repository.find_by_file_md5(self.db, file_md5)
+        vectors = document_vector_repository.find_by_file_md5(db, file_md5)
         
         # Convert to TextChunk list
         return [

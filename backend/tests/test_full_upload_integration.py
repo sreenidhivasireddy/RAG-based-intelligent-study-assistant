@@ -42,7 +42,7 @@ from app.utils.logging import get_logger
 logger = get_logger(__name__)
 
 # Test Configuration
-TEST_FILE_PATH = os.path.expanduser("~/Desktop/NLP_lab06_QA.pdf")
+TEST_FILE_PATH = os.path.expanduser("~/Downloads/Day19 - DevSecOps (1).pdf")
 CHUNK_SIZE = 5 * 1024 * 1024  # 5MB per chunk
 
 # Global variables
@@ -234,8 +234,7 @@ def start_consumer_thread():
     # create the vectorization service
     vectorization_service = VectorizationService(
         embedding_client=embedding_client,
-        elasticsearch_service=es_service,
-        db=db
+        elasticsearch_service=es_service
     )
     
     # create the consumer
