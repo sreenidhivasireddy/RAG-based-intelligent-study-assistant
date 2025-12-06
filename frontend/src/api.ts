@@ -96,6 +96,22 @@ export const searchApi = {
 };
 
 export const chatApi = {
+  // WebSocket 聊天 - 实时流式响应
+  createWebSocket: (conversationId: string) => {
+    const wsUrl = `ws://localhost:8000/api/v1/chat/ws/${conversationId}`;
+    return new WebSocket(wsUrl);
+  },
+
+  // 发送消息通过 WebSocket
+  sendMessageViaWebSocket: (ws: WebSocket, message: string) => {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ message }));
+    } else {
+      throw new Error('WebSocket is not connected');
+    }
+  },
+
+  // 备选：非流式聊天（使用搜索API）
   sendMessage: async (message: string) => {
     // 调用真实的 Search API
     const searchRes = await searchApi.search(message, 5);
@@ -121,5 +137,57 @@ export const chatApi = {
       sources: searchRes.results,
       searchResponse: searchRes
     };
+  }
+};
+
+// Conversation API
+export const conversationApi = {
+  // 获取所有会话列表
+  listAll: async () => {
+    const response = await api.get<{
+      code: number;
+      message: string;
+      data: Array<{
+        conversation_id: string;
+        title: string;
+        message_count: number;
+        first_message_time: string | null;
+        last_message_time: string | null;
+        preview: string;
+      }>;
+    }>('/conversations/');
+    
+    return response.data;
+  },
+
+  // 获取对话历史
+  getHistory: async (conversationId: string, startDate?: string, endDate?: string) => {
+    const params = new URLSearchParams();
+    if (startDate) params.append('start_date', startDate);
+    if (endDate) params.append('end_date', endDate);
+    
+    const response = await api.get<{
+      code: number;
+      message: string;
+      data: Array<{
+        role: 'user' | 'assistant';
+        content: string;
+        timestamp: string;
+      }>;
+    }>(`/conversations/${conversationId}?${params}`);
+    
+    return response.data;
+  },
+
+  // 清空对话历史
+  clearHistory: async (conversationId: string) => {
+    const response = await api.delete(`/conversations/${conversationId}`);
+    return response.data;
+  },
+
+  // 获取对话摘要
+  getSummary: async (conversationId: string) => {
+    const response = await api.get(`/conversations/${conversationId}/summary`);
+    return response.data;
   }
 };

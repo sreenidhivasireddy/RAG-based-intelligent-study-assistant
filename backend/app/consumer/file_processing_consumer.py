@@ -162,10 +162,10 @@ class FileProcessingConsumer:
             logger.info(f"Vectorizing file: fileMd5={task.file_md5}")
             vectorize_db = SessionLocal()
             try:
-            self.vectorization_service.vectorize(
-                    file_md5=task.file_md5,
-                    db=vectorize_db
-            )
+                self.vectorization_service.vectorize(
+                        file_md5=task.file_md5,
+                        db=vectorize_db
+                )
             finally:
                 vectorize_db.close()
             logger.info(f"Vectorization completed, fileMd5: {task.file_md5}")

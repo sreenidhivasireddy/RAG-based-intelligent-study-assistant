@@ -28,6 +28,12 @@ google-generativeai==0.3.1
 # ==================== NLP & Text Processing ====================
 jieba>=0.42.1
 spacy>=3.7.2
+python-dotenv>=1.0.0
+mysql-connector-python>=8.2.0
+requests>=2.31.0
+openai>=1.0.0
+jieba==0.42.1
+spacy==3.7.2
 nltk==3.8.1
 numpy>=1.24.0
 

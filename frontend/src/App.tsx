@@ -11,7 +11,7 @@ function App() {
           <Route index element={<Navigate to="/chat" replace />} />
           <Route path="files" element={<KnowledgeBase />} />
           <Route path="chat" element={<Chat />} />
-
+          <Route path="chat/:conversationId" element={<Chat />} />
         </Route>
       </Routes>
     </BrowserRouter>
