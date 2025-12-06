@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Send, User, Bot, Book, ChevronRight, ChevronDown } from 'lucide-react';
-import { chatApi } from '../api';
+import { chatApi, conversationApi } from '../api';
 import { ChatMessage, SearchResult } from '../types';
 import { clsx } from 'clsx';
 
@@ -15,7 +15,10 @@ const Chat: React.FC = () => {
     }
   ]);
   const [loading, setLoading] = useState(false);
+  const [conversationId] = useState(() => `conv_${Date.now()}`);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+  const currentMessageRef = useRef<string>('');
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -24,6 +27,96 @@ const Chat: React.FC = () => {
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  // WebSocket 连接管理
+  useEffect(() => {
+    // 创建 WebSocket 连接
+    const ws = chatApi.createWebSocket(conversationId);
+    wsRef.current = ws;
+
+    ws.onopen = () => {
+      console.log('✅ WebSocket connected');
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        
+        if (data.error) {
+          console.error('❌ Error from server:', data.error);
+          setMessages(prev => [...prev, {
+            id: Date.now().toString(),
+            role: 'assistant',
+            content: `Error: ${data.error}`,
+            timestamp: Date.now()
+          }]);
+          setLoading(false);
+          return;
+        }
+
+        if (data.chunk) {
+          // 流式响应块
+          currentMessageRef.current += data.chunk;
+          
+          // 更新最后一条消息（实时显示流式内容）
+          setMessages(prev => {
+            const newMessages = [...prev];
+            const lastMsg = newMessages[newMessages.length - 1];
+            
+            if (lastMsg && lastMsg.role === 'assistant' && lastMsg.id === 'streaming') {
+              lastMsg.content = currentMessageRef.current;
+            } else {
+              // 创建新的流式消息
+              newMessages.push({
+                id: 'streaming',
+                role: 'assistant',
+                content: currentMessageRef.current,
+                timestamp: Date.now()
+              });
+            }
+            
+            return newMessages;
+          });
+        }
+
+        if (data.type === 'completion' && data.status === 'finished') {
+          // 完成响应
+          console.log('✅ Response completed');
+          setMessages(prev => {
+            const newMessages = [...prev];
+            const lastMsg = newMessages[newMessages.length - 1];
+            
+            if (lastMsg && lastMsg.id === 'streaming') {
+              lastMsg.id = Date.now().toString(); // 给予正式 ID
+            }
+            
+            return newMessages;
+          });
+          
+          currentMessageRef.current = '';
+          setLoading(false);
+        }
+      } catch (error) {
+        console.error('❌ Failed to parse WebSocket message:', error);
+      }
+    };
+
+    ws.onerror = (error) => {
+      console.error('❌ WebSocket error:', error);
+      setLoading(false);
+    };
+
+    ws.onclose = () => {
+      console.log('🔌 WebSocket disconnected');
+    };
+
+    // 清理函数
+    return () => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.close();
+      }
+    };
+  }, [conversationId]);
 
   const handleSend = async () => {
     if (!input.trim() || loading) return;
@@ -38,28 +131,23 @@ const Chat: React.FC = () => {
     setMessages(prev => [...prev, userMsg]);
     setInput('');
     setLoading(true);
+    currentMessageRef.current = '';
 
     try {
-      const response = await chatApi.sendMessage(userMsg.content);
-      
-      const aiMsg: ChatMessage = {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: response.content, // 在真实 RAG 中，这里是 LLM 生成的回答
-        sources: response.sources, // 搜索到的相关片段
-        timestamp: Date.now()
-      };
-
-      setMessages(prev => [...prev, aiMsg]);
+      // 通过 WebSocket 发送消息
+      if (wsRef.current) {
+        chatApi.sendMessageViaWebSocket(wsRef.current, userMsg.content);
+      } else {
+        throw new Error('WebSocket not connected');
+      }
     } catch (error) {
-      console.error(error);
+      console.error('❌ Failed to send message:', error);
       setMessages(prev => [...prev, {
         id: Date.now().toString(),
         role: 'assistant',
-        content: 'Sorry, I encountered an error while searching.',
+        content: 'Sorry, I encountered an error. Please check the connection.',
         timestamp: Date.now()
       }]);
-    } finally {
       setLoading(false);
     }
   };

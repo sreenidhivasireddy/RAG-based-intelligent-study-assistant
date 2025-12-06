@@ -1,9 +1,13 @@
-from typing import List, Dict, Callable
+from typing import List, Dict, Callable, Optional
 from collections import defaultdict
 from uuid import uuid4
 import logging
-from app.clients.gpt_client import GptClient
-from app.services.search_service import HybridSearchService
+import json
+import asyncio
+import time
+from datetime import datetime, timedelta
+from app.clients.gpt_client import GPTClient
+from app.services.search import HybridSearchService
 import redis
 logger = logging.getLogger(__name__)
 
@@ -18,7 +22,7 @@ class ChatHandler:
     def __init__(
         self,
         redis_client: redis.Redis,
-        llm_client: GptClient,
+        llm_client: GPTClient,
         search_service: HybridSearchService,
         conversation_id: str = "default_conversation",
         max_history: int = 20
@@ -41,72 +45,7 @@ class ChatHandler:
         
         logger.info(f"ChatHandler 初始化完成，会话ID: {conversation_id}")
     
-    def process_message(
-        self,
-        user_message: str,
-        on_chunk: Optional[Callable[[str], None]] = None,
-        on_complete: Optional[Callable[[str], None]] = None,
-        on_error: Optional[Callable[[Exception], None]] = None,
-        top_k: int = 5
-    ):
-        """
-        处理用户消息（同步版本）
-        
-        Args:
-            user_message: 用户输入的消息
-            on_chunk: 收到流式响应块时的回调
-            on_complete: 响应完成时的回调
-            on_error: 发生错误时的回调
-            top_k: 检索返回的文档数量
-            
-        Returns:
-            完整的 AI 响应
-        """
-        try:
-            logger.info(f"开始处理消息，会话ID: {self.conversation_id}")
-            
-            # 1. 获取对话历史
-            history = self._get_conversation_history()
-            logger.debug(f"获取到 {len(history)} 条历史对话")
-            
-            # 2. 执行检索（不带用户权限过滤）
-            search_results = self.search_service.search(
-                query=user_message,
-                top_k=top_k
-            )
-            logger.debug(f"检索结果数量: {len(search_results)}")
-            
-            # 3. 构建上下文
-            context = self._build_context(search_results)
-            
-            # 4. 调用 LLM 流式响应
-            logger.info("调用 LLM 生成回复")
-            
-            full_response = self.llm_client.stream_response(
-                user_message=user_message,
-                context=context,
-                history=history,
-                on_chunk=on_chunk,
-                on_error=on_error
-            )
-            # 5. 发送完成通知
-            if on_complete:
-                on_complete(full_response)
-            
-            # 6. 更新对话历史
-            self._update_conversation_history(user_message, full_response)
-            
-            logger.info(f"消息处理完成，响应长度: {len(full_response)}")
-            return full_response
-
-        except Exception as e:
-            logger.error(f"处理消息失败: {e}", exc_info=True)
-            if on_error:
-                on_error(e)
-            raise
-    
-
-    async def process_message_async(
+    async def process_message(
         self,
         user_message: str,
         websocket=None,  # WebSocket 连接对象
@@ -130,7 +69,7 @@ class ChatHandler:
             history = self._get_conversation_history()
             
             # 2. 执行检索
-            search_results = self.search_service.search(
+            search_results, search_metadata = self.search_service.hybrid_search(
                 query=user_message,
                 top_k=top_k
             )

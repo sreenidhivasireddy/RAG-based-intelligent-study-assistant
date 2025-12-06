@@ -5,12 +5,22 @@ from fastapi.responses import JSONResponse
 import logging
 
 from app.clients.redis import redis_client
-from app.clients.gpt_client import GptClient
+from app.clients.gpt_client import GPTClient
+from app.clients.elastic import es_client
+from app.clients.gemini_embedding_client import GeminiEmbeddingClient
 from app.services.search import HybridSearchService
 from app.services.chat_handler import ChatHandler
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+# Initialize shared services
+gpt_client_instance = GPTClient()
+embedding_client = GeminiEmbeddingClient()
+hybrid_search_service = HybridSearchService(
+    es_client=es_client,
+    embedding_client=embedding_client
+)
 
 
 @router.websocket("/ws/{conversation_id}")
@@ -38,8 +48,8 @@ async def websocket_chat_endpoint(
     # 创建 ChatHandler
     chat_handler = ChatHandler(
         redis_client=redis_client,
-        llm_client=GptClient,
-        search_service=HybridSearchService,
+        llm_client=gpt_client_instance,
+        search_service=hybrid_search_service,
         conversation_id=conversation_id
     )
     

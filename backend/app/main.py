@@ -5,10 +5,12 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.upload import router as upload_router
 from app.api.documents import router as documents_router
+from app.api.search import router as search_router
+from app.api.chat import router as chat_router
+from app.api.conversation import router as conversation_router
 from app.clients import es_index_initializer
 
 logger = logging.getLogger(__name__)
-from app.api.search import router as search_router
 
 app = FastAPI(
     title="PaiSmart API",
@@ -29,6 +31,8 @@ app.add_middleware(
 app.include_router(upload_router, prefix="/api/v1")
 app.include_router(documents_router, prefix="/api/v1")
 app.include_router(search_router, prefix="/api/v1")
+app.include_router(chat_router, prefix="/api/v1/chat", tags=["chat"])
+app.include_router(conversation_router, prefix="/api/v1/conversations", tags=["conversations"])
 
 
 @app.on_event("startup")

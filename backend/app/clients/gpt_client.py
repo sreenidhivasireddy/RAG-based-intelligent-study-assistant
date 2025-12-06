@@ -34,7 +34,7 @@ class GPTClient:
         """
         # 从环境变量读取配置，参数优先级高于环境变量
         self.api_key = os.getenv("OPENAI_API_KEY")
-        self.api_base = os.getenv("OPENAI_API_BASE")
+        self.api_base = os.getenv("OPENAI_API_BASE")  # 支持 DeepSeek 等兼容端点
         self.model = os.getenv("GPT_MODEL", "gpt-4o")
         self.temperature = float(os.getenv("GPT_TEMPERATURE", "0.7"))
         self.top_p = float(os.getenv("GPT_TOP_P", "0.95"))
@@ -46,6 +46,8 @@ class GPTClient:
         
         # 初始化客户端
         client_kwargs = {"api_key": self.api_key}
+        if self.api_base:
+            client_kwargs["base_url"] = self.api_base
             
         self.client = OpenAI(**client_kwargs)
         self.async_client = AsyncOpenAI(**client_kwargs)
@@ -128,9 +130,8 @@ class GPTClient:
         try:
             messages = self._build_messages(user_message, context, history)
             
-            # 使用异步客户端
-            from openai import AsyncOpenAI
-            async_client = AsyncOpenAI(api_key=self.api_key)
+            # 使用异步客户端（复用初始化的实例）
+            async_client = self.async_client
             
             stream = await async_client.chat.completions.create(
                 model=self.model,
