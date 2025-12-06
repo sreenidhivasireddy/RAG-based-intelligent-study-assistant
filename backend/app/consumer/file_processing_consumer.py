@@ -13,6 +13,7 @@ from app.models.file_processing_task import FileProcessingTask
 from app.repositories.upload_repository import update_file_status
 from app.utils.logging import get_logger
 from app.database import SessionLocal
+from app.repositories.upload_repository import update_file_status
 
 logger = get_logger(__name__)
 
@@ -166,6 +167,15 @@ class FileProcessingConsumer:
             logger.info(f"Update file status to completed: fileMd5={task.file_md5}")
             update_file_status(db, task.file_md5, status=1)
             logger.info(f"File processing completed: fileMd5={task.file_md5}")
+            
+            # 4. 更新文件状态为完成 (status=1)
+            # 文件已解析+向量化+写入ES，现在可以被搜索了
+            db = SessionLocal()
+            try:
+                update_file_status(db, task.file_md5, status=1)
+                logger.info(f"文件状态已更新为completed(status=1): fileMd5={task.file_md5}")
+            finally:
+                db.close()
             
             return True
             
