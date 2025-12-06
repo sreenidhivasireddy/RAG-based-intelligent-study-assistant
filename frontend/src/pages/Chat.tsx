@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Send, User, Bot, Book, ChevronRight, ChevronDown } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
 import { chatApi, conversationApi } from '../api';
 import { ChatMessage, SearchResult } from '../types';
 import { clsx } from 'clsx';
@@ -189,12 +190,49 @@ const Chat: React.FC = () => {
               msg.role === 'user' ? "items-end" : "items-start"
             )}>
               <div className={clsx(
-                "p-4 rounded-2xl shadow-sm text-sm leading-relaxed whitespace-pre-wrap",
+                "p-4 rounded-2xl shadow-sm text-sm leading-relaxed",
                 msg.role === 'user' 
-                  ? "bg-gray-800 text-white rounded-tr-none" 
-                  : "bg-white text-gray-800 border border-gray-100 rounded-tl-none"
+                  ? "bg-gray-800 text-white rounded-tr-none whitespace-pre-wrap" 
+                  : "bg-white text-gray-800 border border-gray-100 rounded-tl-none prose prose-sm max-w-none"
               )}>
-                {msg.content}
+                {msg.role === 'assistant' ? (
+                  <ReactMarkdown
+                    components={{
+                      // 自定义代码块样式
+                      code: ({ node, className, children, ...props }) => {
+                        const isInline = !className;
+                        return isInline ? (
+                          <code className="bg-gray-100 text-pink-600 px-1.5 py-0.5 rounded text-xs font-mono" {...props}>
+                            {children}
+                          </code>
+                        ) : (
+                          <code className="block bg-gray-900 text-gray-100 p-3 rounded-lg text-xs font-mono overflow-x-auto" {...props}>
+                            {children}
+                          </code>
+                        );
+                      },
+                      // 自定义列表样式
+                      ul: ({ children }) => <ul className="list-disc list-inside space-y-1 my-2">{children}</ul>,
+                      ol: ({ children }) => <ol className="list-decimal list-inside space-y-1 my-2">{children}</ol>,
+                      // 自定义标题样式
+                      h1: ({ children }) => <h1 className="text-lg font-bold mt-3 mb-2">{children}</h1>,
+                      h2: ({ children }) => <h2 className="text-base font-bold mt-3 mb-2">{children}</h2>,
+                      h3: ({ children }) => <h3 className="text-sm font-bold mt-2 mb-1">{children}</h3>,
+                      // 自定义段落样式
+                      p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+                      // 自定义链接样式
+                      a: ({ href, children }) => (
+                        <a href={href} className="text-blue-600 hover:underline" target="_blank" rel="noopener noreferrer">
+                          {children}
+                        </a>
+                      ),
+                    }}
+                  >
+                    {msg.content}
+                  </ReactMarkdown>
+                ) : (
+                  msg.content
+                )}
               </div>
 
               {/* RAG Sources (Only for assistant) */}
