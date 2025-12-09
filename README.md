@@ -170,20 +170,18 @@ npm install
 
 #### Start Infrastructure Services
 ```bash
-# MySQL
-# TODO: Add MySQL startup instructions
-
 # Redis
-# TODO: Add Redis startup instructions
+brew services start redis
 
 # MinIO
-# TODO: Add MinIO startup instructions
+minio server ~/minio-data --console-address ":9001"
 
 # Elasticsearch
-# TODO: Add Elasticsearch startup instructions
+cd elasticsarch
+.bin/elasticsearch
 
 # Kafka
-# TODO: Add Kafka startup instructions
+brew services start kafka
 ```
 
 #### Start Backend Services
