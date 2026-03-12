@@ -29,9 +29,21 @@ Output will be generated in `dist/`.
 npm run lint
 ```
 
-## API Endpoint
-The frontend uses `API_BASE_URL = http://localhost:8000/api/v1` (see `src/api.ts`).
-If your backend runs elsewhere, update `API_BASE_URL` accordingly.
+## Environment Variables
+Create `frontend/.env` for local development if you want to override the defaults:
+
+```bash
+VITE_API_BASE_URL=http://localhost:8000/api/v1
+VITE_WS_BASE_URL=ws://localhost:8000/api/v1
+VITE_HEALTH_URL=http://localhost:8000/health
+```
+
+Defaults are local-friendly, so `frontend/.env` is optional for local work.
+
+For deployment, set the same variables in your hosting platform:
+- `VITE_API_BASE_URL=https://your-backend-domain/api/v1`
+- `VITE_WS_BASE_URL=wss://your-backend-domain/api/v1`
+- `VITE_HEALTH_URL=https://your-backend-domain/health`
 
 ## Key Features
 - Chat UI that calls the real search API (no mocks).
@@ -57,5 +69,5 @@ frontend/
 
 ## Notes
 - Backend must be running and reachable at the configured API base URL.
-- For production, remember to set the correct API URL before building.
+- For production, set the `VITE_*` variables before building.
 

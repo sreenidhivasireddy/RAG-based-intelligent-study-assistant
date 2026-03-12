@@ -15,7 +15,24 @@ import {
   EvaluationRegressionPoint,
 } from './types';
 
-const API_BASE_URL = 'http://localhost:8000/api/v1';
+const DEFAULT_API_BASE_URL = 'http://localhost:8000/api/v1';
+const DEFAULT_WS_BASE_URL = 'ws://localhost:8000/api/v1';
+const DEFAULT_HEALTH_URL = 'http://localhost:8000/health';
+
+const trimTrailingSlash = (value: string) => value.replace(/\/+$/, '');
+
+const API_BASE_URL = trimTrailingSlash(
+  import.meta.env.VITE_API_BASE_URL || DEFAULT_API_BASE_URL
+);
+
+const WS_BASE_URL = trimTrailingSlash(
+  import.meta.env.VITE_WS_BASE_URL ||
+    API_BASE_URL.replace(/^http:\/\//, 'ws://').replace(/^https:\/\//, 'wss://')
+);
+
+const HEALTH_URL = trimTrailingSlash(
+  import.meta.env.VITE_HEALTH_URL || DEFAULT_HEALTH_URL
+);
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -136,7 +153,7 @@ export const searchApi = {
 export const chatApi = {
   // WebSocket chat - real-time streaming response
   createWebSocket: (conversationId: string) => {
-    const wsUrl = `ws://localhost:8000/api/v1/chat/ws/${conversationId}`;
+    const wsUrl = `${WS_BASE_URL}/chat/ws/${conversationId}`;
     return new WebSocket(wsUrl);
   },
 
@@ -320,7 +337,7 @@ export const conversationApi = {
 
 export const systemApi = {
   health: async () => {
-    const response = await axios.get<HealthResponse>('http://localhost:8000/health');
+    const response = await axios.get<HealthResponse>(HEALTH_URL);
     return response.data;
   }
 };
