@@ -1,69 +1,98 @@
 #!/usr/bin/env python3
 """
 Kafka Consumer Startup Script
-独立运行的 Kafka Consumer 进程，用于处理文件解析和向量化任务
+Standalone Kafka consumer process for file parsing and vectorization tasks
 
-运行方式：
+Run with:
     python -m app.consumer.run_consumer
-
-或后台运行：
-    nohup python -m app.consumer.run_consumer > logs/consumer.log 2>&1 &
 """
 
 import sys
+import os
 from pathlib import Path
 
-# 确保能导入 app 模块
+# -------------------------------------------------------------------
+# ✅ Ensure imports work
+# -------------------------------------------------------------------
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
+# -------------------------------------------------------------------
+# ✅ Load .env explicitly (CRITICAL on Windows)
+# -------------------------------------------------------------------
+try:
+    from dotenv import load_dotenv
+except ImportError:
+    load_dotenv = None
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]  # .../backend
+ENV_PATH = PROJECT_ROOT / ".env"
+
+if load_dotenv:
+    if ENV_PATH.exists():
+        load_dotenv(dotenv_path=str(ENV_PATH), override=True)
+    else:
+        load_dotenv(override=True)
 
 from app.services.parse_service import ParseService
 from app.services.vectorize_service import VectorizationService
-from app.services.es_service import ElasticsearchService
-from app.clients.gemini_embedding_client import GeminiEmbeddingClient
+from app.services.azure_search_service import AzureSearchService
+from app.clients.azure_openai_embedding_client import AzureOpenAIEmbeddingClient
 from app.consumer.file_processing_consumer import FileProcessingConsumer
-import app.clients.elastic as es
+
+# ✅ IMPORTANT: azure_search must be the CLIENT FACTORY module
+import app.clients.azure_search as azure_search
+
 from app.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
 
 def main():
-    """
-    main function to start the Kafka Consumer
-    """
     logger.info("=" * 80)
     logger.info("🚀 Starting File Processing Kafka Consumer")
     logger.info("=" * 80)
-    
+
+    kafka_bootstrap = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "").strip()
+    kafka_topic = os.getenv("KAFKA_FILE_PROCESSING_TOPIC", "").strip()
+
+    logger.info(f"ENV: KAFKA_BOOTSTRAP_SERVERS      = {kafka_bootstrap or '(missing)'}")
+    logger.info(f"ENV: KAFKA_FILE_PROCESSING_TOPIC = {kafka_topic or '(missing)'}")
+    logger.info(f"ENV loaded from: {ENV_PATH if ENV_PATH.exists() else '(default dotenv search)'}")
+
+    if not kafka_bootstrap:
+        raise RuntimeError(
+            "KAFKA_BOOTSTRAP_SERVERS is missing. "
+            "Add it to backend/.env like: KAFKA_BOOTSTRAP_SERVERS=127.0.0.1:29092"
+        )
+
     consumer = None
-    
+
     try:
-        # 1. initialize the parse service
+        # 1) Parse service
         logger.info("Initializing parse service...")
         parse_service = ParseService(chunk_size=500)
-        
-        # 3. initialize the embedding client
-        logger.info("Initializing Gemini embedding client...")
-        if not GeminiEmbeddingClient.is_configured():
+
+        # 2) Embeddings client
+        logger.info("Initializing Azure OpenAI embedding client...")
+        embedding_client = AzureOpenAIEmbeddingClient()
+        if not embedding_client.is_configured():
             raise RuntimeError(
-                "GEMINI_API_KEY is not configured. "
-                "Please set the GEMINI_API_KEY environment variable in .env file."
+                "AZURE_OPENAI_API_KEY is not configured. Please set it in backend/.env."
             )
-        embedding_client = GeminiEmbeddingClient()
-        
-        # 4. initialize the Elasticsearch service
-        logger.info("Initializing Elasticsearch service...")
-        es_client = es.get_client()
-        es_service = ElasticsearchService(es_client)
-        
-        # 5. 初始化向量化服务
+
+        # 3) Azure Search client + service  ✅ THIS IS WHAT YOU ASKED FOR
+        logger.info("Initializing Azure AI Search service...")
+        search_client = azure_search.get_azure_search_client()
+        azure_search_service = AzureSearchService(search_client)
+
+        # 4) Vectorization service
         logger.info("Initializing vectorization service...")
         vectorization_service = VectorizationService(
             embedding_client=embedding_client,
-            elasticsearch_service=es_service
+            search_service=azure_search_service
         )
-        
-        # 6. create the Kafka Consumer
+
+        # 5) Consumer
         logger.info("Creating Kafka Consumer...")
         consumer = FileProcessingConsumer(
             parse_service=parse_service,
@@ -71,37 +100,35 @@ def main():
             max_retries=4,
             retry_backoff_seconds=3
         )
-        
+
         logger.info("=" * 80)
         logger.info("✅ All services initialized successfully")
         logger.info("=" * 80)
         logger.info("Consumer is now listening for messages...")
         logger.info("Press Ctrl+C to stop")
         logger.info("=" * 80)
-        
-        # 7. start the consumption loop (blocking run)
+
         consumer.start_consuming()
-        
+
     except KeyboardInterrupt:
         logger.info("\n" + "=" * 80)
         logger.info("Received stop signal (Ctrl+C), shutting down gracefully...")
         logger.info("=" * 80)
-        
+
     except Exception as e:
         logger.error(f"Fatal error occurred: {e}", exc_info=True)
         raise
-        
+
     finally:
-        # cleanup the resources
         logger.info("Cleaning up resources...")
-        
+
         if consumer:
             try:
                 consumer.close()
                 logger.info("✓ Kafka Consumer closed")
             except Exception as e:
                 logger.error(f"Error closing consumer: {e}")
-        
+
         logger.info("=" * 80)
         logger.info("Consumer stopped")
         logger.info("=" * 80)
@@ -109,4 +136,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

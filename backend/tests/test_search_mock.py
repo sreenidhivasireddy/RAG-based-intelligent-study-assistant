@@ -176,7 +176,7 @@ def test_auto_weight_adjustment():
             "PyTorch", "TensorFlow", "Keras", "API", "GPU", "CUDA",
             "Transformer", "BERT", "GPT", "Adam", "SGD", "ReLU"
         ]
-        question_words = ["how", "what", "why", "when", "where", "如何", "什么", "为什么"]
+        question_words = ["how", "what", "why", "when", "where"]
         
         has_technical = any(term in query for term in technical_terms)
         is_question = any(word in query.lower() for word in question_words)
@@ -193,9 +193,9 @@ def test_auto_weight_adjustment():
     test_cases = [
         ("PyTorch Adam optimizer", "technical", 0.3, 0.7),
         ("How to improve model accuracy?", "semantic", 0.7, 0.3),
-        ("如何优化神经网络？", "semantic", 0.7, 0.3),
+        ("How can a neural network be optimized?", "semantic", 0.7, 0.3),
         ("TensorFlow GPU CUDA performance", "technical", 0.3, 0.7),
-        ("深度学习", "balanced", 0.5, 0.5),
+        ("deep learning", "balanced", 0.5, 0.5),
         ("This is a very long query that should trigger semantic mode because it exceeds fifty characters", "semantic", 0.7, 0.3),
     ]
     

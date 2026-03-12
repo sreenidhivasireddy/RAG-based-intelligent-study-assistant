@@ -7,6 +7,7 @@ API Endpoints:
 - GET /api/v1/upload/status - Query upload progress and status
 """
 
+import os
 from fastapi import APIRouter, UploadFile, File, Form, Depends
 from sqlalchemy.orm import Session
 from typing import Annotated
@@ -15,8 +16,9 @@ from app.database import SessionLocal
 from app.schemas.upload import ChunkUploadRequest, FileMergeRequest, FileMergeResponse
 from app.services.upload import upload_chunk_service, calculate_upload_progress, merge_file_service
 from app.repositories.upload_repository import get_file_upload
+from app.services.upload import _publish_file_processing_event
 from app.clients.kafka import KafkaConfig
-from app.clients.minio import minio_client, MINIO_BUCKET
+from app.storage.azure_blob import azure_blob_client, AZURE_STORAGE_CONTAINER
 from app.models.file_processing_task import FileProcessingTask
 from app.utils.logging import get_logger
 
@@ -242,7 +244,7 @@ def merge_file(
     db: Session = Depends(get_db)
 ):
     """
-    合并文件并发送到Kafka处理队列
+    Merge the file and send it to the Kafka processing queue.
     Merge all uploaded file chunks into a single complete file.
     
     **URL**: `/api/v1/upload/merge`  
@@ -346,66 +348,72 @@ def merge_file(
             file_name=request.file_name
         )
 
-        # generate the presigned URL for the file
-        # so that the consumer can download the file via HTTP
-        # instead of using the MinIO object path (e.g. "documents/abc123/file.pdf")
+        # Generate SAS URL for the file for HTTP downloads
+        # Azure Blob Storage equivalent to MinIO presigned URLs
         object_name = result['object_url']
         
-        if minio_client and not object_name.startswith('http'):
-            # generate the presigned URL (valid for 7 days)
-            from datetime import timedelta
-            logger.info(f"generating the presigned URL for the file: {object_name}")
+        if azure_blob_client and not object_name.startswith('http'):
+            # Generate SAS URL (valid for 7 days) for Azure Blob Storage
+            from datetime import datetime, timedelta
+            from azure.storage.blob import generate_blob_sas, BlobSasPermissions
             
-            presigned_url = minio_client.presigned_get_object(
-                MINIO_BUCKET,
-                object_name,
-                expires=timedelta(days=7)
-            )
-            file_url = presigned_url
-            logger.info(f"✅ generated the presigned URL successfully (valid for 7 days)")
-            logger.info(f"   URL: {file_url[:100]}...")
+            logger.info(f"Generating SAS URL for the file: {object_name}")
+            
+            try:
+                # Extract connection string components
+                from azure.storage.blob import BlobServiceClient
+                blob_service_client = BlobServiceClient.from_connection_string(
+                    os.getenv("AZURE_STORAGE_CONNECTION_STRING")
+                )
+                
+                account_name = blob_service_client.account_name
+                account_key = None
+                
+                # Try to extract account key from connection string
+                conn_str = os.getenv("AZURE_STORAGE_CONNECTION_STRING", "")
+                if "AccountKey=" in conn_str:
+                    account_key = conn_str.split("AccountKey=")[1].split(";")[0]
+                
+                if account_key:
+                    # Generate SAS token
+                    sas_token = generate_blob_sas(
+                        account_name=account_name,
+                        container_name=AZURE_STORAGE_CONTAINER,
+                        blob_name=object_name,
+                        account_key=account_key,
+                        permission=BlobSasPermissions(read=True),
+                        expiry=datetime.utcnow() + timedelta(days=7)
+                    )
+                    
+                    file_url = f"https://{account_name}.blob.core.windows.net/{AZURE_STORAGE_CONTAINER}/{object_name}?{sas_token}"
+                    logger.info(f"✅ Generated SAS URL successfully (valid for 7 days)")
+                    logger.info(f"   URL: {file_url[:100]}...")
+                else:
+                    # Fallback to object path if SAS generation fails
+                    logger.warning("Cannot generate SAS URL, using object path instead")
+                    file_url = object_name
+            except Exception as e:
+                logger.warning(f"Failed to generate SAS URL: {e}, using object path instead")
+                file_url = object_name
         else:
-            # if it is already an HTTP URL or minio_client is not configured, use the original path
-            logger.info(f"使用原始路径: {object_name}")
+            # If already HTTP URL or client not configured, use original path
+            logger.info(f"Using original path: {object_name}")
             file_url = object_name
 
-        # 3. create the Kafka task
-        task = FileProcessingTask(
-            file_md5=request.file_md5,
-            file_path=file_url,  # use the presigned URL instead of the object path
-            file_name=request.file_name
-        )
-        
-         # 4. send to Kafka
+        # 3. Publish to Kafka with the SAS URL (or fallback path)
+        # This is the only place where we publish - ensures consistency
+        import time
         try:
-            # get the producer
-            producer = KafkaConfig.get_producer()
-            
-            # get the topic name
-            topic = KafkaConfig.get_file_processing_topic()
-            
-            logger.info(
-                f"Sending task to Kafka: topic={topic}, "
-                f"fileMd5={task.file_md5}, fileName={task.file_name}"
+            _publish_file_processing_event(
+                file_md5=request.file_md5,
+                file_name=request.file_name,
+                file_path=file_url  # SAS URL or fallback to object path
             )
+            logger.info(f"✅ Published processing task to Kafka for file {request.file_md5}")
             
-            # send the message
-            future = producer.send(
-                topic,
-                key=task.file_md5,
-                value=task.to_dict()
-            )
-            
-            # wait for the message to be sent
-            record_metadata = future.get(timeout=10)
-            
-            logger.info(
-                f"Task sent successfully: partition={record_metadata.partition}, "
-                f"offset={record_metadata.offset}"
-            )
-
         except Exception as kafka_error:
             logger.error(f"Failed to send task to Kafka: {kafka_error}", exc_info=True)
+            raise
 
         # Return success response with file info
         return {
@@ -430,4 +438,3 @@ def merge_file(
             "code": code,
             "message": error_message
         }
-

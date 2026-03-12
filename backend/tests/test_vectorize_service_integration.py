@@ -28,10 +28,10 @@ from app.database import SessionLocal, engine, Base
 from app.services.parse_service import ParseService
 from app.services.vectorize_service import VectorizationService
 from app.repositories import document_vector_repository
-from app.clients.gemini_embedding_client import GeminiEmbeddingClient
-from app.services.es_service import ElasticsearchService
-import app.clients.elastic as es
-from app.clients.elastic import ES_INDEX
+from app.clients.azure_openai_embedding_client import AzureOpenAIEmbeddingClient
+from app.services.azure_search_service import AzureSearchService
+import app.clients.azure_search as azure_search
+from app.core.search_config import search_config
 import app.clients.es_index_initializer as es_index_initializer
 
 TEST_FILE_MD5 = None
@@ -46,23 +46,25 @@ def setup_database():
 
 
 def setup_embedding():
-    if not GeminiEmbeddingClient.is_configured():
-        raise RuntimeError("GEMINI_API_KEY missing.")
-    return GeminiEmbeddingClient()
+    client = AzureOpenAIEmbeddingClient()
+    if not client.is_configured():
+        raise RuntimeError("Azure OpenAI embedding client not configured.")
+    return client
 
 
 def setup_es_service():
     """
-    Reuse the runtime ES client so tests mirror production behavior.
+    Setup Azure AI Search service for testing.
     """
     try:
-        client = es.get_client()
+        search_client = azure_search.get_azure_search_client()
     except RuntimeError as exc:
         raise RuntimeError(
-            "Elasticsearch client not initialized. Ensure ES is running and .env"
-            " contains the correct connection info."
+            "Azure AI Search client not initialized. Ensure configuration is set"
+            " in .env with AZURE_SEARCH_ENDPOINT, AZURE_SEARCH_ADMIN_KEY,"
+            " and AZURE_SEARCH_INDEX."
         ) from exc
-    return ElasticsearchService(client)
+    return AzureSearchService(search_client)
 
 
 # =============================================================
@@ -73,9 +75,9 @@ def step_parse_and_save():
     global TEST_FILE_MD5
 
     test_text = """
-    人工智能与机器学习 人工智能（Artificial Intelligence，AI）是计算机科学的一个重要分支。 
-    它研究如何让机器模拟人类智能，使计算机能够像人一样思考和学习。 机器学习是实现人工智能的一种方法。通过机器学习，计算机可以从数据中自动学习规律。 
-    深度学习是机器学习的一个子领域，它使用神经网络来处理复杂的数据。 自然语言处理 自然语言处理（NLP）是人工智能的重要应用领域之一。 它让计算机能够理解、解释和生成人类语言。 NLP 的应用包括机器翻译、情感分析、文本摘要等。 通过深度学习技术，NLP 的性能得到了显著提升。 计算机视觉 计算机视觉让机器能够"看"和理解图像与视频。 它的应用包括人脸识别、物体检测、图像分类等。 卷积神经网络（CNN）是计算机视觉中最常用的深度学习模型。 通过训练，CNN 可以自动学习图像的特征。
+    Artificial Intelligence and Machine Learning. Artificial intelligence (AI) is an important branch of computer science. 
+    It studies how machines can simulate human intelligence so computers can think and learn. Machine learning is one way to implement AI, allowing computers to learn patterns from data. 
+    Deep learning is a subfield of machine learning that uses neural networks to process complex data. Natural language processing (NLP) is an important AI application area. It allows computers to understand, interpret, and generate human language. NLP applications include machine translation, sentiment analysis, and text summarization. Deep learning has significantly improved NLP performance. Computer vision enables machines to understand images and video. Applications include face recognition, object detection, and image classification. Convolutional neural networks (CNNs) are among the most common deep learning models in computer vision, and they can learn image features automatically through training.
     """
 
     TEST_FILE_MD5 = hashlib.md5(test_text.encode()).hexdigest()
@@ -116,7 +118,7 @@ def step_vectorize(expected_chunk_count):
 
     service = VectorizationService(
         embedding_client=embedding,
-        elasticsearch_service=es_service
+        search_service=es_service
     )
 
     service.vectorize(TEST_FILE_MD5, db=db)
@@ -132,29 +134,34 @@ def step_vectorize(expected_chunk_count):
 # =============================================================
 
 def step_verify_es(expected_chunks, es_service):
-    es_client = es_service.es
+    # Use Azure Search client's search API to find documents by file id
+    client = getattr(es_service, "search_client", None)
+    if client is None:
+        raise RuntimeError("AzureSearchService missing underlying search_client")
 
-    resp = es_client.search(
-        index=ES_INDEX,
-        query={"term": {"file_md5": {"value": TEST_FILE_MD5}}},
-        size=expected_chunks
-    )
+    filter_query = f"fileMd5 eq '{TEST_FILE_MD5}' or file_md5 eq '{TEST_FILE_MD5}'"
+    results = list(client.search(search_text="*", filter=filter_query, top=expected_chunks))
 
-    hits = [h["_source"] for h in resp["hits"]["hits"]]
+    hits = []
+    for r in results:
+        try:
+            # SearchResult behaves like dict-like object
+            hits.append(dict(r))
+        except Exception:
+            hits.append(r)
 
-    assert len(hits) == expected_chunks, \
-        f"Expected {expected_chunks} docs in ES, found {len(hits)}"
+    assert len(hits) == expected_chunks, f"Expected {expected_chunks} docs in Azure Search, found {len(hits)}"
 
-    print(f"✓ Elasticsearch contains {len(hits)} documents")
+    print(f"✓ Azure Search contains {len(hits)} documents")
 
-    # Verify structure of the first doc
+    # Verify presence of expected fields (accept both snake_case and camelCase)
     doc = hits[0]
-    assert "file_md5" in doc
-    assert "chunk_id" in doc
-    assert "text_content" in doc
-    assert "model_version" in doc
+    assert any(k in doc for k in ("file_md5", "fileMd5")), "file_md5/fileMd5 not present"
+    assert any(k in doc for k in ("chunk_id", "chunkId")), "chunk_id/chunkId not present"
+    assert any(k in doc for k in ("text_content", "textContent")), "text_content/textContent not present"
+    assert any(k in doc for k in ("model_version", "modelVersion")), "model_version/modelVersion not present"
 
-    print("✓ ES document structure validated")
+    print("✓ Azure Search document structure validated")
 
 
 # =============================================================

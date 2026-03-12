@@ -46,13 +46,13 @@ class QueryTestCase:
 TEST_CASES = [
     # Chinese queries
     QueryTestCase(
-        query="深度学习模型优化",
-        expected_keywords=["深度", "学习", "优化", "模型"],
+        query="deep learning model optimization",
+        expected_keywords=["deep", "learning", "optimization", "model"],
         category="chinese"
     ),
     QueryTestCase(
-        query="神经网络训练方法",
-        expected_keywords=["神经网络", "训练"],
+        query="neural network training methods",
+        expected_keywords=["neural", "training"],
         category="chinese"
     ),
     
@@ -70,20 +70,20 @@ TEST_CASES = [
     
     # Mixed queries
     QueryTestCase(
-        query="PyTorch 深度学习",
-        expected_keywords=["pytorch", "深度", "学习"],
+        query="PyTorch deep learning",
+        expected_keywords=["pytorch", "deep", "learning"],
         category="mixed"
     ),
     QueryTestCase(
-        query="Adam optimizer 训练",
-        expected_keywords=["adam", "optim", "训练"],
+        query="Adam optimizer training",
+        expected_keywords=["adam", "optim", "training"],
         category="mixed"
     ),
     
     # Questions
     QueryTestCase(
-        query="如何提高模型准确率？",
-        expected_keywords=["模型", "准确"],
+        query="How can model accuracy be improved?",
+        expected_keywords=["model", "accuracy"],
         category="question"
     ),
     QueryTestCase(
@@ -395,7 +395,7 @@ def main():
     
     # Run mode comparison
     print("\nRunning search mode comparison...")
-    comparison = compare_search_modes("深度学习 优化")
+    comparison = compare_search_modes("deep learning optimization")
     
     # Generate report
     report = generate_quality_report(results)

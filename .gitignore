@@ -48,9 +48,12 @@ venv.bak/
 .pytest_cache/
 .coverage
 coverage.xml
+htmlcov/
 
 # mypy
 .mypy_cache/
+.ruff_cache/
+.cache/
 
 # pip / packaging metadata
 pip-wheel-metadata/
@@ -58,6 +61,7 @@ __pypackages__/
 
 # Node
 node_modules/
+frontend/dist/
 
 # Secrets / keys
 secrets.yml
@@ -94,3 +98,7 @@ nbproject/
 # Temporary files
 tmp/
 temp/
+
+# Project-specific local artifacts
+backend/downloaded_test.txt
+backend/test.txt

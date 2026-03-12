@@ -1,5 +1,19 @@
 import axios from 'axios';
-import { UploadedFile, SearchResponse } from './types';
+import {
+  UploadedFile,
+  SearchResponse,
+  QuizDifficulty,
+  QuizBloomLevel,
+  QuizResponse,
+  EvalProvider,
+  DatasetSource,
+  RagEvaluationResponse,
+  RagBatchDatasetItem,
+  RagBatchEvaluationResponse,
+  AutomatedEvalResponse,
+  HealthResponse,
+  EvaluationRegressionPoint,
+} from './types';
 
 const API_BASE_URL = 'http://localhost:8000/api/v1';
 
@@ -11,8 +25,8 @@ const api = axios.create({
 export const fileApi = {
   // Check upload status
   checkStatus: async (fileMd5: string) => {
-    const response = await api.get<{ uploadedChunks: number[], status: string }>(`/upload/status`, {
-      params: { file_md5: fileMd5 } // Backend expects snake_case? Check upload.py: file_md5
+    const response = await api.get<{ code: number; message: string; data: { uploaded: number[]; progress: number; total_chunks: number } }>(`/upload/status`, {
+      params: { file_md5: fileMd5 } // Backend expects snake_case
     });
     return response.data;
   },
@@ -56,7 +70,7 @@ export const fileApi = {
   // Merge chunks
   merge: async (fileMd5: string, fileName: string) => {
     // Backend expects snake_case for merge request
-    const response = await api.post('/upload/merge', { file_md5: fileMd5, file_name: fileName });
+    const response = await api.post<{ code: number; message: string; data: { object_url: string; file_size: number } }>('/upload/merge', { file_md5: fileMd5, file_name: fileName });
     return response.data;
   },
 
@@ -78,8 +92,32 @@ export const fileApi = {
     return response.data.data;
   },
 
+  getOpenUrl: async (fileMd5: string) => {
+    const response = await api.get<{
+      code: number;
+      message: string;
+      data: { fileMd5: string; fileName: string; url: string; blobPath: string };
+    }>(`/documents/${fileMd5}/open-url`);
+    return response.data.data.url;
+  },
+
   delete: async (fileMd5: string) => {
     await api.delete(`/documents/${fileMd5}`);
+  },
+
+  getContent: async (fileMd5: string) => {
+    const response = await api.get<{
+      code: number;
+      message: string;
+      data: {
+        fileMd5: string;
+        fileName: string;
+        content: string;
+        contentLength: number;
+        contentTruncated: boolean;
+      } | null;
+    }>(`/documents/${fileMd5}/content`);
+    return response.data.data;
   }
 };
 
@@ -96,13 +134,13 @@ export const searchApi = {
 };
 
 export const chatApi = {
-  // WebSocket 聊天 - 实时流式响应
+  // WebSocket chat - real-time streaming response
   createWebSocket: (conversationId: string) => {
     const wsUrl = `ws://localhost:8000/api/v1/chat/ws/${conversationId}`;
     return new WebSocket(wsUrl);
   },
 
-  // 发送消息通过 WebSocket
+  // Send a message through WebSocket
   sendMessageViaWebSocket: (ws: WebSocket, message: string) => {
     if (ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ message }));
@@ -111,18 +149,18 @@ export const chatApi = {
     }
   },
 
-  // 备选：非流式聊天（使用搜索API）
+  // Fallback: non-streaming chat using the search API
   sendMessage: async (message: string) => {
-    // 调用真实的 Search API
+    // Call the real search API
     const searchRes = await searchApi.search(message, 5);
     
-    // 根据搜索结果构建回复内容
+    // Build the response from search results
     let content: string;
     
     if (searchRes.results.length === 0) {
       content = `No relevant information found for "${message}". Try uploading related documents first.`;
     } else {
-      // 显示搜索统计信息 (Top result is always 100% in relative scoring)
+      // Show search statistics (top result is always 100% in relative scoring)
       const topResult = searchRes.results[0];
       const sourceInfo = topResult.file_name ? `📄 **Source:** ${topResult.file_name}\n` : '';
       content = `Found ${searchRes.total_results} relevant result(s) in ${searchRes.execution_time_ms?.toFixed(0) || 0}ms.\n\n` +
@@ -140,9 +178,89 @@ export const chatApi = {
   }
 };
 
+export const quizApi = {
+  generate: async (payload: {
+    topic: string;
+    difficulty: QuizDifficulty;
+    number_of_questions: number;
+    bloom_level: QuizBloomLevel;
+    retrieved_chunks: string[];
+  }) => {
+    const response = await api.post<QuizResponse>('/quiz/generate', payload);
+    return response.data;
+  }
+};
+
+export const evaluationApi = {
+  runEvaluationPipeline: async (payload?: { mode?: DatasetSource; dataset_source?: DatasetSource }) => {
+    const response = await api.post<AutomatedEvalResponse>('/evaluate/run', payload ?? {}, {
+      timeout: 600000,
+    });
+    return response.data;
+  },
+
+  getHistory: async (datasetSource: DatasetSource = 'fixed', limit: number = 20) => {
+    const response = await api.get<EvaluationRegressionPoint[]>('/evaluate/history', {
+      params: {
+        dataset_source: datasetSource,
+        limit,
+      },
+    });
+    return response.data;
+  },
+
+  evaluateRag: async (payload: {
+    question: string;
+    answer: string;
+    retrieved_chunks: string[];
+    reference_answer?: string;
+    provider?: EvalProvider;
+  }) => {
+    const response = await api.post<RagEvaluationResponse>('/evaluation/rag', payload);
+    return response.data;
+  },
+
+  evaluateRagBatch: async (payload: {
+    dataset: RagBatchDatasetItem[];
+    provider?: 'azure_ai_evaluation';
+    top_k?: number;
+    file_md5_filter?: string;
+  }) => {
+    const response = await api.post<RagBatchEvaluationResponse>('/evaluation/rag/batch', {
+      provider: 'azure_ai_evaluation',
+      ...payload,
+    });
+    return response.data;
+  }
+};
+
 // Conversation API
 export const conversationApi = {
-  // 获取所有会话列表
+  create: async (conversationId?: string) => {
+    const response = await api.post<{
+      code: number;
+      message: string;
+      data: {
+        conversation_id: string;
+        title: string;
+        message_count: number;
+        first_message_time: string | null;
+        last_message_time: string | null;
+        preview: string;
+      };
+    }>('/conversations/', null, {
+      params: conversationId ? { conversation_id: conversationId } : undefined
+    });
+
+    return response.data;
+  },
+
+  rename: async (conversationId: string, title: string) => {
+    const response = await api.patch(`/conversations/${conversationId}/title`, { title });
+    return response.data;
+  },
+
+  // Get all conversations
   listAll: async () => {
     const response = await api.get<{
       code: number;
@@ -160,7 +278,7 @@ export const conversationApi = {
     return response.data;
   },
 
-  // 获取对话历史
+  // Get conversation history
   getHistory: async (conversationId: string, startDate?: string, endDate?: string) => {
     const params = new URLSearchParams();
     if (startDate) params.append('start_date', startDate);
@@ -179,15 +297,30 @@ export const conversationApi = {
     return response.data;
   },
 
-  // 清空对话历史
+  // Clear conversation history
   clearHistory: async (conversationId: string) => {
     const response = await api.delete(`/conversations/${conversationId}`);
     return response.data;
   },
 
-  // 获取对话摘要
+  // Get conversation summary
   getSummary: async (conversationId: string) => {
     const response = await api.get(`/conversations/${conversationId}/summary`);
+    return response.data;
+  },
+
+  attachFile: async (conversationId: string, fileMd5: string, fileName: string) => {
+    const response = await api.post(`/conversations/${conversationId}/files`, {
+      file_md5: fileMd5,
+      file_name: fileName,
+    });
+    return response.data;
+  },
+};
+
+export const systemApi = {
+  health: async () => {
+    const response = await axios.get<HealthResponse>('http://localhost:8000/health');
     return response.data;
   }
 };

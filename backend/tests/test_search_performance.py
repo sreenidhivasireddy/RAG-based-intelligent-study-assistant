@@ -31,14 +31,14 @@ except ImportError:
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000/api/v1")
 
 TEST_QUERIES = [
-    "深度学习模型优化",
+    "deep learning model optimization",
     "PyTorch training",
-    "神经网络",
+    "neural networks",
     "machine learning algorithm",
-    "Adam optimizer 训练模型",
-    "如何提高准确率",
+    "Adam optimizer model training",
+    "how to improve accuracy",
     "Transformer attention",
-    "卷积神经网络",
+    "convolutional neural networks",
 ]
 
 

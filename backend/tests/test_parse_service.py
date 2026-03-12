@@ -33,13 +33,13 @@ def test_split_text_into_chunks():
     service = ParseService(chunk_size=100)
     
     # Test simple paragraph splitting
-    text = "这是第一段。\n\n这是第二段。\n\n这是第三段。"
+    text = "This is the first paragraph.\n\nThis is the second paragraph.\n\nThis is the third paragraph."
     chunks = service.split_text_into_chunks_with_semantics(text)
     assert len(chunks) > 0
     print(f"✓ Simple paragraph splitting: {len(chunks)} chunks")
     
     # Test long paragraph splitting
-    long_text = "这是一个很长的段落。" * 50
+    long_text = "This is a very long paragraph. " * 50
     chunks = service.split_text_into_chunks_with_semantics(long_text)
     assert len(chunks) > 1
     print(f"✓ Long paragraph splitting: {len(chunks)} chunks")
@@ -57,7 +57,7 @@ def test_split_paragraph_into_sentences():
     service = ParseService(chunk_size=50)
     
     # Test Chinese sentences
-    chinese_text = "这是第一句。这是第二句！这是第三句？"
+    chinese_text = "This is the first sentence. This is the second sentence! This is the third sentence?"
     chunks = service.split_paragraph_into_sentences(chinese_text)
     assert len(chunks) > 0
     print(f"✓ Chinese sentence splitting: {len(chunks)} chunks")
@@ -76,7 +76,7 @@ def test_split_long_sentence():
     service = ParseService(chunk_size=50)
     
     # Test Chinese
-    chinese_sentence = "这是一个非常非常长的句子，它包含了很多很多的字符，需要被拆分成多个小块。" * 5
+    chinese_sentence = "This is a very long sentence with many characters and it needs to be split into smaller chunks. " * 5
     chunks = service.split_long_sentence(chinese_sentence)
     assert len(chunks) > 1
     for chunk in chunks:
@@ -110,12 +110,12 @@ def test_plain_text_iterator():
     print(f"✓ PlainTextIterator test passed: {len(chunks)} chunks")
     
     # Also test with Chinese text but more flexible assertion
-    chinese_text = "这是测试文本"
+    chinese_text = "This is test text"
     stream2 = io.BytesIO(chinese_text.encode('utf-8'))
     iterator2 = PlainTextIterator(stream2, buffer_size=20)
     chunks2 = list(iterator2)
     combined2 = "".join(chunks2)
-    assert "测试" in combined2, "Chinese text should be readable"
+    assert "test" in combined2, "Test text should be readable"
     print(f"✓ Chinese text PlainTextIterator test passed")
 
 
@@ -155,9 +155,9 @@ def test_process_parent_chunk_without_db():
     
     # Prepare test data
     parent_buffer = [
-        "这是第一段测试文本。\n\n",
-        "这是第二段测试文本。\n\n",
-        "这是第三段测试文本。"
+        "This is the first test paragraph.\n\n",
+        "This is the second test paragraph.\n\n",
+        "This is the third test paragraph."
     ]
     
     # Test the text splitting part

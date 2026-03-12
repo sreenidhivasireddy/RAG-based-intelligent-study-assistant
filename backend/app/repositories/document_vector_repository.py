@@ -6,7 +6,7 @@ This module provides CRUD operations for DocumentVector model
 
 from typing import List, Optional
 from sqlalchemy.orm import Session
-from sqlalchemy import delete
+from sqlalchemy import delete, distinct
 from app.models.document_vector import DocumentVector
 from app.utils.logging import get_logger
 
@@ -117,6 +117,21 @@ def count_by_file_md5(db: Session, file_md5: str) -> int:
         Number of chunks
     """
     return db.query(DocumentVector).filter(DocumentVector.file_md5 == file_md5).count()
+
+
+def list_distinct_file_md5s(
+    db: Session,
+    limit: int = 100,
+) -> List[str]:
+    """
+    Return distinct document ids that already have parsed chunks in document_vectors.
+    """
+    rows = (
+        db.query(distinct(DocumentVector.file_md5))
+        .limit(limit)
+        .all()
+    )
+    return [str(row[0]) for row in rows if row and row[0]]
 
 
 def update_document_vector(

@@ -12,8 +12,11 @@ from app.clients.kafka import KafkaConfig
 from app.models.file_processing_task import FileProcessingTask
 from app.repositories.upload_repository import update_file_status
 from app.utils.logging import get_logger
+from app.services.blob_storage import blob_storage_client
+from app.repositories.document_vector_repository import count_by_file_md5, find_by_file_md5
 from app.database import SessionLocal
 from app.repositories.upload_repository import update_file_status
+from app.services.synthetic_eval_generation import trigger_synthetic_eval_generation_background
 
 logger = get_logger(__name__)
 
@@ -101,9 +104,20 @@ class FileProcessingConsumer:
                         f"Failed to download file, HTTP response code: {response.status_code}"
                     )
             
-            # 如果是本地文件路径
+            # If this is an Azure Blob path (e.g. 'documents/<md5>/<name>')
             else:
-                logger.info(f"Detected file system path: {file_path}")
+                # Heuristic: treat paths starting with the configured container prefix as blobs
+                try:
+                    if blob_storage_client and (file_path.startswith("documents/") or '/' in file_path):
+                        logger.info(f"Detected blob storage path: {file_path}, downloading from blob storage")
+                        data = blob_storage_client.download_bytes(file_path)
+                        logger.info(f"Blob download succeeded, size: {len(data)} bytes")
+                        return BytesIO(data)
+                except Exception as be:
+                    logger.warning(f"Blob storage download failed for {file_path}: {be}")
+
+                # Fallback: local filesystem path
+                logger.info(f"Detected file system path (fallback): {file_path}")
                 with open(file_path, 'rb') as f:
                     content = f.read()
                 logger.info(f"File read successfully, size: {len(content)} bytes")
@@ -148,17 +162,23 @@ class FileProcessingConsumer:
             db = SessionLocal()
             
             try:
-                self.parse_service.parse_and_save(
+                chunk_count = self.parse_service.parse_and_save(
                     file_md5=task.file_md5,
                     file_name=task.file_name,
                     file_stream=file_stream,
                     db=db
                 )
-                logger.info(f"File parsed successfully, fileMd5: {task.file_md5}")
+                # Log parsed chunk count and total characters
+                try:
+                    vectors = find_by_file_md5(db, task.file_md5)
+                    total_chars = sum(len(v.text_content or "") for v in vectors)
+                    logger.info(f"File parsed successfully, fileMd5: {task.file_md5}, chunks: {len(vectors)}, chars: {total_chars}")
+                except Exception:
+                    logger.info(f"File parsed successfully, fileMd5: {task.file_md5}")
             finally:
                 db.close()
             
-            # 3. vectorize the file (使用新的 db session 以确保能读取到刚解析的数据)
+            # 3. Vectorize the file with a fresh DB session so newly parsed data is visible.
             logger.info(f"Vectorizing file: fileMd5={task.file_md5}")
             vectorize_db = SessionLocal()
             try:
@@ -170,17 +190,27 @@ class FileProcessingConsumer:
                 vectorize_db.close()
             logger.info(f"Vectorization completed, fileMd5: {task.file_md5}")
             logger.info(f"Update file status to completed: fileMd5={task.file_md5}")
-            update_file_status(db, task.file_md5, status=1)
+            try:
+                update_file_status(db, task.file_md5, status=1)
+            except Exception as e:
+                logger.warning(f"Could not update file status in DB: {e}")
             logger.info(f"File processing completed: fileMd5={task.file_md5}")
             
-            # 4. 更新文件状态为完成 (status=1)
-            # 文件已解析+向量化+写入ES，现在可以被搜索了
+            # 4. Update the file status to completed (status=1).
+            # The file has been parsed, vectorized, and indexed, and is now searchable.
             db = SessionLocal()
             try:
                 update_file_status(db, task.file_md5, status=1)
-                logger.info(f"文件状态已更新为completed(status=1): fileMd5={task.file_md5}")
+                logger.info(f"File status updated to completed (status=1): fileMd5={task.file_md5}")
             finally:
                 db.close()
+
+            # Trigger synthetic QA generation in background after chunking + indexing completion.
+            trigger_synthetic_eval_generation_background(
+                document_id=task.file_md5,
+                pipeline_version="synthetic-v1",
+                replace_existing=True,
+            )
             
             return True
             

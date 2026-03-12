@@ -1,383 +1,282 @@
 # RAG-based Intelligent Study Assistant
 
-A full-stack RAG (Retrieval-Augmented Generation) application that enables intelligent document search and conversational Q&A using hybrid search techniques.
+An end-to-end study assistant built around Retrieval-Augmented Generation (RAG) for document-grounded chat, quiz generation, and automated evaluation.
 
 ## Overview
 
-This system allows users to upload documents (PDF, Word, TXT), which are then parsed, chunked, and indexed with vector embeddings. Users can ask natural language questions and receive answers grounded in their uploaded documents using a hybrid search approach that combines semantic (KNN) and keyword (BM25) search.
+This project lets users upload study material such as PDFs, DOCX files, notes, and text documents, then:
+- ingest and parse them asynchronously
+- chunk and embed them
+- index them for retrieval
+- answer questions grounded in retrieved content
+- generate MCQ quizzes from uploaded material
+- run fixed and synthetic RAG evaluations with regression tracking
+
+## Tech Stack
+
+### Frontend
+- React
+- TypeScript
+- Vite
+- Tailwind CSS
+- React Router
+- Axios
+- React Markdown
+- Lucide React
+- Recharts
+- SparkMD5
+
+### Backend
+- Python
+- FastAPI
+- Uvicorn
+- Pydantic
+- SQLAlchemy
+- python-dotenv
+
+### Data / Messaging
+- MySQL
+- Redis
+- Kafka
+
+### Azure Services
+- Azure OpenAI
+- Azure AI Search
+- Azure Blob Storage
+- Azure AI Evaluation SDK
+
+### Parsing / NLP / Utilities
+- pypdf
+- python-docx
+- NLTK
+- jieba
+- NumPy
+- psutil
+- websockets
+- aiohttp
+
+### Local Infrastructure via Docker Compose
+- Redis
+- Kafka
+- Zookeeper
+- MinIO
+- Elasticsearch
+
+Note: Docker Compose in this repo is used for local infrastructure support. The frontend and backend applications themselves are not containerized here.
+
+## Core Features
+
+- Document upload with chunked/resumable flow
+- Asynchronous ingestion using Kafka consumer pipeline
+- PDF, DOCX, TXT, and note-style document support
+- Hybrid retrieval using vector + keyword search
+- Document-grounded conversational chat over WebSocket
+- File-scoped knowledge base workflow
+- MCQ quiz generation from uploaded material
+- Automated evaluation with three modes:
+  - synthetic
+  - fixed
+  - both
+- Regression tracking for fixed and synthetic evaluation runs
+- Evaluation UI with summaries, per-question scores, and graphs
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                         Frontend                             │
-│              React + TypeScript + Vite                       │
-│        (Chat UI, Document Upload, Management)                │
-└────────────────────────┬────────────────────────────────────┘
-                         │ HTTP/WebSocket
-┌────────────────────────┴────────────────────────────────────┐
-│                    Backend (FastAPI)                         │
-│  ┌──────────────┐  ┌──────────────┐  ┌─────────────────┐   │
-│  │  API Layer   │  │   Services   │  │   Kafka Topic   │   │
-│  │   (REST)     │→ │ (Upload,     │→ │ (file-process)  │   │
-│  │              │  │  Search)     │  │                 │   │
-│  └──────────────┘  └──────────────┘  └────────┬────────┘   │
-└──────────────────────────────────────────────┼─────────────┘
-                         │                      │
-         ┌───────────────┼──────────────────────┘
-         │               │
-         ▼               ▼
-┌────────────────┐  ┌──────────────────────────────────────┐
-│ Kafka Consumer │  │        Storage Layer                 │
-│ (Async Worker) │  │  ┌────────┐ ┌────────┐ ┌──────────┐ │
-│  - Parse docs  │  │  │ MinIO  │ │ Redis  │ │  MySQL   │ │
-│  - Vectorize   │  │  │(Files) │ │(Cache) │ │(Metadata)│ │
-│  - Index to ES │  │  └────────┘ └────────┘ └──────────┘ │
-└────────┬───────┘  │  ┌──────────────────────────────┐   │
-         │          │  │      Elasticsearch           │   │
-         └──────────┼─→│  (Hybrid Search Index)       │   │
-                    │  └──────────────────────────────┘   │
-                    └──────────────────────────────────────┘
-```
+### High-level flow
+1. User uploads a file from the frontend
+2. Backend stores metadata and merged file state
+3. File is stored in Azure Blob Storage
+4. Kafka task is published for background processing
+5. Consumer downloads and parses the file
+6. Parsed chunks are saved in MySQL
+7. Embeddings are generated with Azure OpenAI
+8. Chunks are indexed in Azure AI Search
+9. User queries trigger hybrid retrieval
+10. Retrieved chunks are passed into Azure OpenAI for grounded response generation
+11. Synthetic QA generation and evaluation can run on processed documents
 
-## Key Features
+### Backend structure
+- `backend/app/api/`
+  - FastAPI routers
+- `backend/app/services/`
+  - business logic
+- `backend/app/repositories/`
+  - database access layer
+- `backend/app/models/`
+  - SQLAlchemy ORM models
+- `backend/app/schemas/`
+  - Pydantic schemas
+- `backend/app/clients/`
+  - Azure, Redis, Kafka, and external service clients
+- `backend/app/consumer/`
+  - Kafka background consumer
 
-### 📄 Document Processing
-- **Chunked Upload**: Large file support with resumable uploads
-- **Multi-format Support**: PDF, Word (.docx), and plain text files
-- **Async Processing**: Kafka-based message queue for background parsing and vectorization
-- **Progress Tracking**: Real-time upload progress with Redis bitmaps
+### Frontend structure
+- `frontend/src/pages/`
+  - Chat, Knowledge Base, Quiz, Evaluation pages
+- `frontend/src/components/`
+  - shared UI components and evaluation charts
+- `frontend/src/api.ts`
+  - API client layer
+- `frontend/src/types.ts`
+  - shared TypeScript types
 
-### 🔍 Hybrid Search
-- **Dual Search Strategy**: Combines semantic (KNN vector) and keyword (BM25) search
-- **Single Query Execution**: Efficient server-side fusion using Elasticsearch script_score
-- **Auto Weight Adjustment**: Dynamically adjusts KNN/BM25 weights based on query characteristics
-- **Multi-field Text Analysis**: Separate Chinese (IK) and English (stemming) analyzers
-- **Phrase Matching**: Boosts exact phrase matches for technical terms
-- **Smart Highlighting**: Filters stopwords and highlights meaningful terms
+## Retrieval Pipeline
 
-### 💬 Conversational Interface
-- **WebSocket Chat**: Real-time streaming responses
-- **Context-aware Q&A**: Retrieves relevant document chunks before generating answers
-- **Conversation History**: Persistent chat sessions with message tracking
-- **Source Attribution**: Shows which documents were used to answer questions
+### Retrieval method
+Hybrid retrieval is used:
+- semantic retrieval through embeddings
+- lexical retrieval through keyword search
 
-## Project Structure
+### Retrieval steps
+1. User submits a question
+2. Query embedding is generated using Azure OpenAI
+3. Query type is inspected to adjust retrieval weighting
+4. Azure AI Search runs hybrid retrieval
+5. Top chunks are deduplicated and assembled into context
+6. Azure OpenAI generates a grounded answer using retrieved chunks only
 
-```
-.
-├── backend/                      # FastAPI backend service
-│   ├── app/
-│   │   ├── api/                  # REST API endpoints
-│   │   │   ├── upload.py         # File upload (chunked)
-│   │   │   ├── documents.py      # Document management
-│   │   │   ├── search.py         # Hybrid search API
-│   │   │   ├── chat.py           # WebSocket chat
-│   │   │   └── conversation.py   # Conversation management
-│   │   ├── services/             # Business logic
-│   │   │   ├── upload_service.py # Upload handling
-│   │   │   ├── search.py         # Hybrid search implementation
-│   │   │   ├── parse_service.py  # Document parsing
-│   │   │   ├── vectorize_service.py  # Embedding generation
-│   │   │   └── chat_handler.py   # Chat logic
-│   │   ├── consumer/             # Kafka consumer
-│   │   │   ├── file_processing_consumer.py
-│   │   │   └── run_consumer.py   # Consumer entry point
-│   │   ├── clients/              # External service clients
-│   │   │   ├── minio.py          # MinIO object storage
-│   │   │   ├── redis.py          # Redis cache
-│   │   │   ├── elastic.py        # Elasticsearch
-│   │   │   └── gemini_embedding_client.py  # Embedding API
-│   │   ├── models/               # SQLAlchemy ORM models
-│   │   ├── schemas/              # Pydantic schemas
-│   │   └── core/                 # Configuration
-│   ├── docs/                     # Technical documentation
-│   │   ├── HYBRID_SEARCH_EN.md   # Hybrid search guide
-│   │   └── MULTIFIELD_SEARCH_EN.md
-│   └── tests/                    # Test suite
-│
-├── frontend/                     # React frontend
-│   ├── src/
-│   │   ├── pages/
-│   │   │   ├── Chat.tsx          # Chat interface
-│   │   │   └── KnowledgeBase.tsx # Document management
-│   │   ├── components/           # Reusable UI components
-│   │   ├── api.ts                # Backend API client
-│   │   └── types.ts              # TypeScript types
-│   └── public/
-│
-└── README.md                     # This file
-```
+### Retrieval techniques used
+- vector embeddings
+- hybrid search
+- weight auto-adjustment based on query style
+- chunk deduplication
+- source-aware prompting
+- bounded context assembly
 
-## Technology Stack
+## File Ingestion and Processing
 
-### Backend
-- **Framework**: FastAPI, Uvicorn (ASGI)
-- **Database**: MySQL (metadata), SQLAlchemy ORM
-- **Cache**: Redis (upload progress, session management)
-- **Object Storage**: MinIO (S3-compatible)
-- **Search Engine**: Elasticsearch (hybrid search, vector storage)
-- **Message Queue**: Kafka (async task processing)
-- **Embedding**: Google Gemini API
+### Supported files
+- PDF
+- DOCX
+- TXT
+- Markdown-like text files
 
-### Frontend
-- **Framework**: React 18 + TypeScript
-- **Build Tool**: Vite
-- **Styling**: Tailwind CSS
-- **HTTP Client**: Axios
-- **WebSocket**: Native WebSocket API
+### Ingestion steps
+1. Frontend splits file into chunks and computes MD5
+2. Backend accepts chunk uploads
+3. Upload progress is tracked
+4. Chunks are merged into the final file
+5. Kafka processing event is emitted
+6. Consumer downloads file from storage
+7. File is parsed and chunked
+8. Chunks are stored in MySQL
+9. Embeddings are created
+10. Indexed records are written to Azure AI Search
+11. File status is updated to completed
 
-## Quick Start
+## Quiz System
+
+The project includes a quiz workflow that:
+- generates MCQ questions from uploaded material
+- presents them in flashcard style
+- checks selected answers
+- reveals the correct answer and explanation after selection
+- calculates final score
+- shows an answer summary after completion
+
+## Evaluation System
+
+### Evaluation modes
+- `synthetic`
+  - QA pairs generated automatically from uploaded document chunks
+- `fixed`
+  - seeded static dataset for regression tracking
+- `both`
+  - runs synthetic and fixed together with separate summaries
+
+### Evaluation metrics
+- Groundedness
+- Relevance
+- Similarity
+- Overall score
+
+### Evaluation technology
+- Azure AI Evaluation SDK
+- Azure OpenAI as LLM judge configuration
+
+### Evaluators used
+- `GroundednessEvaluator`
+- `RelevanceEvaluator`
+- `SimilarityEvaluator`
+
+### Regression tracking
+- Separate histories for `fixed` and `synthetic`
+- Stored evaluation runs with run labels such as `Run 1`, `Run 2`
+- Frontend charts for trend tracking over time
+
+## Local Development
 
 ### Prerequisites
-- Python 3.8+
+- Python 3.10+
 - Node.js 18+
-- MySQL 5.7+
-- Redis 5.0+
-- MinIO (latest)
-- Elasticsearch 7.x/8.x
-- Kafka 2.8+ (with Zookeeper or KRaft)
+- MySQL
+- Azure service credentials configured in `backend/.env`
 
-### 1. Clone Repository
+### Backend
 ```bash
-git clone <repository-url>
-cd RAG-based-intelligent-study-assistant
-```
-
-### 2. Setup Backend
-
-```bash
-# Create virtual environment
-python3 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Configure environment
-cp backend/.env.example backend/.env
-# Edit backend/.env with your configuration
-```
-
-### 3. Setup Frontend
-
-```bash
-cd frontend
-npm install
-```
-
-### 4. Start Services
-
-#### Start Infrastructure Services
-```bash
-# Redis
-brew services start redis
-
-# MinIO
-minio server ~/minio-data --console-address ":9001"
-
-# Elasticsearch
-cd elasticsarch
-.bin/elasticsearch
-
-# Kafka
-brew services start kafka
-```
-
-#### Start Backend Services
-```bash
-# Terminal 1: API Server
 cd backend
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r ..\requirements.txt
 uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+```
 
-# Terminal 2: Kafka Consumer (for document processing)
+### Kafka consumer
+```bash
 cd backend
+.venv\Scripts\activate
 python -m app.consumer.run_consumer
 ```
 
-#### Start Frontend
-```bash
-# Terminal 3: Frontend Dev Server
-cd frontend
-npm run dev
-```
-
-Access the application at `http://localhost:5173`
-
-## Configuration
-
-### Backend Environment Variables
-Key configurations in `backend/.env`:
-
-```bash
-# ==================== Server Configuration ====================
-PORT=8000
-DEBUG=True
-LOG_LEVEL=INFO
-
-# ==================== MySQL Configuration ====================
-MYSQL_HOST=localhost
-MYSQL_PORT=3306
-MYSQL_USER=
-MYSQL_PASSWORD=   
-MYSQL_DATABASE=rag
-
-# ==================== Redis Configuration ====================
-REDIS_HOST=localhost
-REDIS_PORT=6379
-REDIS_DB=0
-
-# ==================== MinIO Configuration ====================
-MINIO_ENDPOINT=localhost:9000
-MINIO_ACCESS_KEY= 
-MINIO_SECRET_KEY=   
-MINIO_BUCKET=documents
-MINIO_SECURE=False
-
-# ==================== Kafka Configuration ====================
-KAFKA_BOOTSTRAP_SERVERS=localhost:9092
-
-# ==================== Elasticsearch Configuration ====================
-ES_HOST=localhost
-ES_PORT=9200
-ES_SCHEME=http
-ES_INDEX_NAME=knowledge_base
-# Security disabled for local testing
-ES_USERNAME=elastic
-ES_PASSWORD=      
-
-# ==================== Gemini API Configuration ====================
-GEMINI_API_KEY=   
-GEMINI_MODEL_NAME=models/embedding-001
-GEMINI_BATCH_SIZE=100
-
-# ==================== Document Parsing Configuration ====================
-CHUNK_SIZE=512
-PARENT_CHUNK_SIZE=1048576
-BUFFER_SIZE=8192
-MAX_MEMORY_THRESHOLD=0.8
-
-# ==================== Search Configuration ====================
-# Hybrid Search Weights (KNN vs BM25)
-SEARCH_KNN_WEIGHT=0.5
-SEARCH_BM25_WEIGHT=0.5
-SEARCH_RRF_K=60
-
-# Multi-field Boost (BM25 internal)
-SEARCH_CHINESE_BOOST=1.0
-SEARCH_ENGLISH_BOOST=0.8
-SEARCH_STANDARD_BOOST=0.5
-SEARCH_TIE_BREAKER=0.3
-
-# Search Result Limits
-SEARCH_DEFAULT_TOP_K=10
-SEARCH_MAX_TOP_K=100
-
-# Search Mode: hybrid, knn, bm25
-SEARCH_DEFAULT_MODE=hybrid
-
-# Features
-SEARCH_MULTIFIELD_ENABLED=true
-SEARCH_AUTO_ADJUST_WEIGHTS=true
-SEARCH_HIGHLIGHT_ENABLED=true
-SEARCH_HIGHLIGHT_FRAGMENT_SIZE=150
-SEARCH_HIGHLIGHT_FRAGMENTS=3
-
-# ==================== OpenAI GPT Configuration ====================
-OPENAI_API_KEY=     
-GPT_MODEL=gpt-4o-mini
-GPT_TEMPERATURE=0.7
-GPT_TOP_P=0.95
-GPT_MAX_TOKENS=2000
-
-
-
-```
-
-See `backend/ENV_CONFIG_GUIDE.md` for detailed configuration options.
-
-## API Endpoints
-
-### Document Management
-- `POST /api/v1/upload/chunk` - Upload file chunk
-- `POST /api/v1/upload/merge` - Merge chunks into complete file
-- `GET /api/v1/upload/status` - Query upload progress
-- `GET /api/v1/documents/list` - List all documents
-
-### Search
-- `POST /api/v1/search/hybrid` - Hybrid search (KNN + BM25)
-- `POST /api/v1/search/knn` - Pure semantic search
-- `POST /api/v1/search/bm25` - Pure keyword search
-
-### Chat
-- `WebSocket /api/v1/chat/ws/{conversation_id}` - Real-time chat
-- `GET /api/v1/conversations` - List conversations
-- `POST /api/v1/conversations/{id}/clear` - Clear conversation history
-
-Interactive API documentation: `http://localhost:8000/docs`
-
-## File Processing Lifecycle
-
-1. **Upload** → User uploads file chunks via frontend
-2. **Merge** → Backend merges chunks and stores in MinIO
-3. **Queue** → Merge service sends message to Kafka topic
-4. **Process** → Consumer picks up message and:
-   - Downloads file from MinIO
-   - Parses document (PDF/Word/TXT)
-   - Chunks text into segments
-   - Generates embeddings
-   - Indexes to Elasticsearch
-5. **Search** → Users can now search document content
-
-See `backend/FILE_LIFECYCLE.md` for detailed workflow.
-
-## Hybrid Search Strategy
-
-The system uses a novel hybrid search approach:
-
-1. **Query Analysis**: Automatically detects technical terms and question patterns
-2. **Dual Retrieval**: 
-   - Semantic search using embeddings (KNN)
-   - Keyword search using BM25 with multi-field analysis
-3. **Dynamic Weighting**: Adjusts KNN/BM25 weights based on query characteristics
-4. **RRF Fusion**: Combines scores using Reciprocal Rank Fusion
-5. **Smart Highlighting**: Emphasizes meaningful content words
-
-See `backend/docs/HYBRID_SEARCH_EN.md` for technical details.
-
-## Testing
-
-### Backend Tests
-```bash
-cd backend
-./run_tests.sh
-```
-
-Test coverage includes:
-- Upload API (chunked, idempotent)
-- Search API (hybrid, KNN, BM25)
-- Kafka integration
-- Service layer logic
-
 ### Frontend
 ```bash
 cd frontend
-npm run lint
+npm install
+npm run dev
 ```
 
-## Documentation
+### Optional local infra with Docker Compose
+```bash
+docker compose up -d
+```
 
-- `backend/README.md` - Backend setup and API reference
-- `backend/CONSUMER_README.md` - Kafka consumer guide
-- `backend/FILE_LIFECYCLE.md` - Document processing workflow
-- `backend/docs/HYBRID_SEARCH_EN.md` - Hybrid search implementation
-- `backend/docs/MULTIFIELD_SEARCH_EN.md` - Multi-field text analysis
-- `frontend/README.md` - Frontend setup and structure
+## Main Application Pages
+
+- `Chat`
+  - document-grounded question answering
+- `Knowledge Base`
+  - file upload and management
+- `Quiz`
+  - generated MCQ quiz experience
+- `Evaluation`
+  - synthetic/fixed RAG evaluation and regression tracking
+
+## Key Project Strengths
+
+- Full-stack RAG implementation, not just a chat wrapper
+- Async ingestion pipeline with background processing
+- Real document grounding using retrieval
+- Quiz generation from uploaded study material
+- Automated evaluation with visible regression tracking
+- Clear service/repository separation in backend design
+
+## Repository Structure
+
+```text
+.
++- frontend/
++- backend/
+�  +- app/
+�  +- data/
+�  +- docs/
+�  +- scripts/
+�  +- tests/
++- docker-compose.yml
++- README.md
++- requirements.txt
+```
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
-
----
-
-**Happy Coding! 🚀**
+MIT

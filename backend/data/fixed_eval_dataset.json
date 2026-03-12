@@ -1,0 +1,72 @@
+[
+  {
+    "id": "fixed-001",
+    "question": "What is the main purpose of Retrieval-Augmented Generation in an AI study assistant?",
+    "expected_answer": "Retrieval-Augmented Generation improves answer quality by retrieving relevant document chunks and grounding the model response in those retrieved sources.",
+    "topic": "rag-basics",
+    "difficulty": "easy"
+  },
+  {
+    "id": "fixed-002",
+    "question": "How does hybrid retrieval improve over using only keyword search?",
+    "expected_answer": "Hybrid retrieval combines lexical matching and semantic vector similarity, so it can capture exact term matches and meaning-based matches at the same time.",
+    "topic": "retrieval",
+    "difficulty": "medium"
+  },
+  {
+    "id": "fixed-003",
+    "question": "Why are document chunks created before generating embeddings?",
+    "expected_answer": "Document chunks are created so large files are broken into manageable units that can be embedded, indexed, and retrieved with better relevance.",
+    "topic": "chunking",
+    "difficulty": "easy"
+  },
+  {
+    "id": "fixed-004",
+    "question": "When a system returns an answer with low groundedness, what does that imply about the retrieved evidence?",
+    "expected_answer": "Low groundedness implies the answer is not well supported by the retrieved evidence and may include unsupported claims or hallucinated details.",
+    "topic": "evaluation",
+    "difficulty": "medium"
+  },
+  {
+    "id": "fixed-005",
+    "question": "Compare the roles of Azure Blob Storage and MySQL in this RAG architecture.",
+    "expected_answer": "Azure Blob Storage stores the uploaded document files, while MySQL stores structured metadata such as file records, chunk metadata, and evaluation datasets.",
+    "topic": "architecture",
+    "difficulty": "medium"
+  },
+  {
+    "id": "fixed-006",
+    "question": "Why is Kafka useful in the file ingestion pipeline?",
+    "expected_answer": "Kafka decouples file upload from downstream processing by allowing parsing, vectorization, and indexing to happen asynchronously after upload completion.",
+    "topic": "pipeline",
+    "difficulty": "easy"
+  },
+  {
+    "id": "fixed-007",
+    "question": "If two retrieved chunks are semantically similar, why might deduplication be useful in synthetic evaluation generation?",
+    "expected_answer": "Deduplication helps avoid storing near-duplicate synthetic questions, which reduces wasted evaluation cost and produces a more diverse test set.",
+    "topic": "synthetic-eval",
+    "difficulty": "hard"
+  },
+  {
+    "id": "fixed-008",
+    "question": "What is the difference between groundedness and relevance in RAG evaluation?",
+    "expected_answer": "Groundedness measures whether the answer is supported by the retrieved context, while relevance measures how well the answer addresses the user question.",
+    "topic": "evaluation",
+    "difficulty": "medium"
+  },
+  {
+    "id": "fixed-009",
+    "question": "How does regression tracking help when evaluating a RAG system over time?",
+    "expected_answer": "Regression tracking shows whether evaluation scores improve or decline across runs, making it easier to spot degradations after code or prompt changes.",
+    "topic": "regression",
+    "difficulty": "easy"
+  },
+  {
+    "id": "fixed-010",
+    "question": "A study assistant uses a static fixed evaluation set and a dynamic synthetic evaluation set. Why use both?",
+    "expected_answer": "The fixed set supports stable regression tracking across runs, while the synthetic set reflects the currently ingested documents and tests document-specific behavior.",
+    "topic": "evaluation-strategy",
+    "difficulty": "hard"
+  }
+]

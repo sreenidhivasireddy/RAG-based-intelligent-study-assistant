@@ -182,7 +182,7 @@ POST /api/v1/search/analyze
 Content-Type: application/json
 
 {
-  "text": "PyTorch 深度学习优化",
+  "text": "PyTorch deep learning optimization",
   "analyzer": "chinese_smart"
 }
 ```

@@ -1,0 +1,60 @@
+Install MinIO
+
+Command line:
+
+curl -O https://dl.min.io/server/minio/release/darwin-amd64/minio
+chmod +x minio
+sudo mv minio /usr/local/bin/
+
+Verify installation:
+
+minio --version
+
+Start MinIO:
+
+minio server ~/minio-data --console-address ":9001"
+
+After startup:
+- API endpoint: http://localhost:9000
+- Console: http://localhost:9001
+- Default credentials: minioadmin / minioadmin
+
+Open the browser at http://localhost:9001 and sign in with the default credentials.
+Create a bucket named `documents`.
+
+Test file: `tests/test_minio.py`
+
+If the client version does not match:
+
+python -m pip install "minio>=7.2.0"
+cd backend && python tests/test_minio.py
+
+If the test passes, refresh the MinIO console, confirm the test file appears in the bucket, and then delete `test.txt`.
+
+Install Redis
+
+brew install redis
+brew services start redis
+
+Verify Redis:
+
+redis-cli ping
+
+Expected output:
+
+PONG
+
+Install Kafka locally
+
+brew install kafka
+brew services start kafka
+
+Add Kafka to PATH:
+
+export PATH="/opt/homebrew/opt/kafka/bin:$PATH"
+
+Persist it in `~/.zshrc`:
+
+open -e ~/.zshrc
+# append the export line
+source ~/.zshrc

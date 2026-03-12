@@ -71,11 +71,8 @@ def clean_text(text: str) -> str:
     # Remove control characters (except newline, tab, carriage return)
     text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]', '', text)
     
-    # Remove private use area characters (often used for custom fonts in PDFs)
-    text = re.sub(r'[\ue000-\uf8ff]', '', text)
-    
-    # Remove surrogate characters
-    text = re.sub(r'[\ud800-\udfff]', '', text)
+    # Keep private-use/surrogate glyphs for PDFs.
+    # Some PDFs encode visible text into these ranges; stripping them can erase content entirely.
     
     # Normalize multiple spaces to single space
     text = re.sub(r' +', ' ', text)
@@ -304,7 +301,7 @@ class ParseService:
             if not sentence:
                 continue
 
-            # 句子太长 → 按词语拆
+            # Sentence too long -> split by words.
             if len(sentence) > self.chunk_size:
                 if current:
                     chunks.append("".join(current).strip())
@@ -312,7 +309,7 @@ class ParseService:
                 chunks.extend(self.split_long_sentence(sentence))
                 continue
 
-            # 能否拼进当前 chunk？
+            # Check whether it can fit into the current chunk.
             if sum(len(x) for x in current) + len(sentence) > self.chunk_size:
                 chunks.append("".join(current).strip())
                 current = [sentence]
@@ -332,9 +329,9 @@ class ParseService:
 
         ascii_ratio = sum(c.isascii() for c in sentence) / max(len(sentence), 1)
         if ascii_ratio > 0.7:
-            words = word_tokenize(sentence)  # 英文
+            words = word_tokenize(sentence)  # English
         else:
-            words = list(jieba.cut(sentence))  # 中文
+            words = list(jieba.cut(sentence))  # Chinese
 
         current = []
         current_len = 0

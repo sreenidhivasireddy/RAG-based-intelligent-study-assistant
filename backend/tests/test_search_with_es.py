@@ -1,9 +1,9 @@
 """
-Integration test for search API with Elasticsearch.
-Requires ES to be running, but NOT MySQL/Redis/Gemini.
+Integration test for search API with Azure AI Search.
+Requires Azure AI Search service to be set up, but NOT MySQL/Redis/Gemini.
 
 Usage:
-    1. Start ES: ./elasticsearch-9.2.0/bin/elasticsearch
+    1. Set AZURE_SEARCH_ENDPOINT and AZURE_SEARCH_ADMIN_KEY environment variables
     2. Run: python tests/test_search_with_es.py
 """
 
@@ -13,40 +13,38 @@ import os
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from elasticsearch import Elasticsearch
+from azure.search.documents import SearchClient
+from azure.core.credentials import AzureKeyCredential
 
 
 # ----- Configuration -----
-ES_HOST = os.getenv("ES_HOST", "localhost")
-ES_PORT = os.getenv("ES_PORT", "9200")
-ES_USER = os.getenv("ES_USER", "elastic")
-ES_PASSWORD = os.getenv("ES_PASSWORD", "your_password")
+AZURE_SEARCH_ENDPOINT = os.getenv("AZURE_SEARCH_ENDPOINT", "")
+AZURE_SEARCH_KEY = os.getenv("AZURE_SEARCH_ADMIN_KEY", "")
 TEST_INDEX = "test_knowledge_base"
 
 
-def get_es_client():
-    """Create ES client with basic auth"""
-    return Elasticsearch(
-        [f"https://{ES_HOST}:{ES_PORT}"],
-        basic_auth=(ES_USER, ES_PASSWORD),
-        verify_certs=False,
-        ssl_show_warn=False
-    )
+def get_azure_search_client():
+    """Create Azure Search client"""
+    if not AZURE_SEARCH_ENDPOINT or not AZURE_SEARCH_KEY:
+        raise ValueError("AZURE_SEARCH_ENDPOINT and AZURE_SEARCH_ADMIN_KEY environment variables must be set")
+    
+    credentials = AzureKeyCredential(AZURE_SEARCH_KEY)
+    return SearchClient(endpoint=AZURE_SEARCH_ENDPOINT, index_name=TEST_INDEX, credential=credentials)
 
 
-def check_es_connection():
-    """Check if ES is available"""
+def check_azure_search_connection():
+    """Check if Azure AI Search is available"""
     print("=" * 60)
-    print("Step 1: Check ES Connection")
+    print("Step 1: Check Azure AI Search Connection")
     print("=" * 60)
     
     try:
-        es = get_es_client()
-        info = es.info()
-        print(f"✅ ES connected successfully!")
-        print(f"   Version: {info['version']['number']}")
-        print(f"   Cluster: {info['cluster_name']}")
-        return es
+        client = get_azure_search_client()
+        # Try a simple search to verify connection
+        results = list(client.search(search_text="*", top=1))
+        print(f"✅ Azure AI Search connected successfully!")
+        print(f"   Index: {TEST_INDEX}")
+        return client
     except Exception as e:
         print(f"❌ ES connection failed: {e}")
         print()
@@ -138,14 +136,14 @@ def insert_test_data(es: Elasticsearch):
         {
             "fileMd5": "file003",
             "chunkId": 1,
-            "textContent": "机器学习是人工智能的一个分支。它使用数据来训练模型，从而进行预测。",
+            "textContent": "Machine learning is a branch of artificial intelligence. It uses data to train models for prediction.",
             "vector": [0.3] * 768,
             "modelVersion": "text-embedding-004"
         },
         {
             "fileMd5": "file003",
             "chunkId": 2,
-            "textContent": "深度学习使用多层神经网络。常见的架构包括 CNN、RNN 和 Transformer。",
+            "textContent": "Deep learning uses multi-layer neural networks. Common architectures include CNN, RNN, and Transformer.",
             "vector": [0.35] * 768,
             "modelVersion": "text-embedding-004"
         },

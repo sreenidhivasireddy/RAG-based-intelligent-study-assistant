@@ -5,8 +5,11 @@ This module provides CRUD operations for FileUpload and ChunkInfo models.
 It should be used by the service layer (app.services.upload) for persistence.
 """
 
+from sqlalchemy import distinct
 from sqlalchemy.orm import Session
+
 from app.models import FileUpload, ChunkInfo
+from app.models.document_vector import DocumentVector
 
 
 def get_file_upload(db: Session, file_md5: str) -> FileUpload | None:
@@ -209,3 +212,25 @@ def get_file_upload_count(db: Session, status_filter: int = None) -> int:
         query = query.filter(FileUpload.status == status_filter)
     
     return query.count()
+
+
+def get_file_uploads_with_vectors(
+    db: Session,
+    limit: int = 100,
+) -> list[FileUpload]:
+    """
+    Return uploaded files that have at least one parsed chunk in document_vectors.
+    This is the valid source set for synthetic evaluation generation because the
+    synthetic_eval_dataset table has a foreign key to file_upload.
+    """
+    subquery = (
+        db.query(distinct(DocumentVector.file_md5).label("file_md5"))
+        .subquery()
+    )
+    return (
+        db.query(FileUpload)
+        .join(subquery, FileUpload.file_md5 == subquery.c.file_md5)
+        .order_by(FileUpload.created_at.desc())
+        .limit(limit)
+        .all()
+    )

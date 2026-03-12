@@ -25,18 +25,18 @@ sys.path.insert(0, str(backend_path))
 
 from app.database import SessionLocal
 from app.clients.kafka import KafkaConfig
-from app.clients.minio import minio_client, MINIO_BUCKET
+from app.storage.azure_blob import azure_blob_client, AZURE_STORAGE_CONTAINER
 from app.services.parse_service import ParseService
 from app.services.vectorize_service import VectorizationService
-from app.services.es_service import ElasticsearchService
+from app.services.azure_search_service import AzureSearchService
 from app.services.upload import upload_chunk_service, merge_file_service
 from app.repositories import upload_repository, document_vector_repository
 from app.consumer.file_processing_consumer import FileProcessingConsumer
-from app.clients.gemini_embedding_client import GeminiEmbeddingClient
+from app.clients.azure_openai_embedding_client import AzureOpenAIEmbeddingClient
 from app.models.file_processing_task import FileProcessingTask
 from app.schemas.upload import ChunkUploadRequest
-import app.clients.elastic as es
-from app.clients.elastic import ES_INDEX
+import app.clients.azure_search as azure_search
+from app.clients.azure_search import get_azure_search_config
 from app.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -153,27 +153,57 @@ def test_step_2_merge_file_and_send_to_kafka():
         )
         
         logger.info(f"✅ File merged successfully")
-        logger.info(f"   MinIO path: {result.get('object_url', 'N/A')}")
+        logger.info(f"   Azure Blob path: {result.get('object_url', 'N/A')}")
         logger.info(f"    File size: {result.get('file_size', 0) / 1024:.2f} KB")
         
-        # 2. generate the presigned URL for the file
+        # 2. Generate the SAS URL for the file
         object_name = result['object_url']
         logger.info(f"object_name: {object_name}")
-        logger.info(f"minio_client is None: {minio_client is None}")
+        logger.info(f"azure_blob_client is None: {azure_blob_client is None}")
         logger.info(f"starts with http: {object_name.startswith('http')}")
         
-        if minio_client and not object_name.startswith('http'):
-            # generate the presigned URL (valid for 7 days)
-            from datetime import timedelta
-            logger.info(f"Generating the presigned URL for the file: {object_name}")
-            presigned_url = minio_client.presigned_get_object(
-                MINIO_BUCKET,
-                object_name,
-                expires=timedelta(days=7)
-            )
-            file_url = presigned_url
-            logger.info(f"✅ generated the presigned URL successfully")
-            logger.info(f"   URL: {file_url[:150]}...")
+        if azure_blob_client and not object_name.startswith('http'):
+            # Generate the SAS URL (valid for 7 days) using Azure Blob Storage
+            from datetime import datetime, timedelta
+            from azure.storage.blob import generate_blob_sas, BlobSasPermissions
+            import os
+            
+            logger.info(f"Generating the SAS URL for the file: {object_name}")
+            
+            try:
+                from azure.storage.blob import BlobServiceClient
+                blob_service_client = BlobServiceClient.from_connection_string(
+                    os.getenv("AZURE_STORAGE_CONNECTION_STRING")
+                )
+                
+                account_name = blob_service_client.account_name
+                account_key = None
+                
+                # Extract account key from connection string
+                conn_str = os.getenv("AZURE_STORAGE_CONNECTION_STRING", "")
+                if "AccountKey=" in conn_str:
+                    account_key = conn_str.split("AccountKey=")[1].split(";")[0]
+                
+                if account_key:
+                    # Generate SAS token
+                    sas_token = generate_blob_sas(
+                        account_name=account_name,
+                        container_name=AZURE_STORAGE_CONTAINER,
+                        blob_name=object_name,
+                        account_key=account_key,
+                        permission=BlobSasPermissions(read=True),
+                        expiry=datetime.utcnow() + timedelta(days=7)
+                    )
+                    
+                    file_url = f"https://{account_name}.blob.core.windows.net/{AZURE_STORAGE_CONTAINER}/{object_name}?{sas_token}"
+                    logger.info(f"✅ Generated the SAS URL successfully")
+                    logger.info(f"   URL: {file_url[:150]}...")
+                else:
+                    logger.warning("Cannot generate SAS URL, using object path instead")
+                    file_url = object_name
+            except Exception as e:
+                logger.warning(f"Failed to generate SAS URL: {e}, using object path instead")
+                file_url = object_name
         else:
             logger.info(f"using the original path: {object_name}")
             file_url = object_name
@@ -223,18 +253,18 @@ def start_consumer_thread():
     parse_service = ParseService(chunk_size=500)
     
     # create the embedding client
-    if not GeminiEmbeddingClient.is_configured():
-        raise RuntimeError("GEMINI_API_KEY 未配置")
-    embedding_client = GeminiEmbeddingClient()
+    embedding_client = AzureOpenAIEmbeddingClient()
+    if not embedding_client.is_configured():
+        raise RuntimeError("Azure OpenAI embedding client not configured")
     
-    # create the ES service
-    es_client = es.get_client()
-    es_service = ElasticsearchService(es_client)
+    # create the Azure Search service
+    search_client = azure_search.get_azure_search_client()
+    azure_search_service = AzureSearchService(search_client)
     
     # create the vectorization service
     vectorization_service = VectorizationService(
         embedding_client=embedding_client,
-        elasticsearch_service=es_service
+        search_service=azure_search_service
     )
     
     # create the consumer

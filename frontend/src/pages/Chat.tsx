@@ -1,8 +1,9 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Send, User, Bot, Book, ChevronRight, ChevronDown } from 'lucide-react';
+import { Send, User, Bot, Book, ChevronRight, ChevronDown, Paperclip, Loader2 } from 'lucide-react';
 import { useParams, useOutletContext } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
-import { chatApi, conversationApi } from '../api';
+import SparkMD5 from 'spark-md5';
+import { chatApi, conversationApi, fileApi } from '../api';
 import { ChatMessage, SearchResult } from '../types';
 import { clsx } from 'clsx';
 
@@ -10,9 +11,50 @@ interface LayoutContext {
   refreshConversations: () => void;
 }
 
+const CHUNK_SIZE = 5 * 1024 * 1024;
+
+const calculateMD5 = (file: File): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const blobSlice =
+      File.prototype.slice ||
+      (File.prototype as any).mozSlice ||
+      (File.prototype as any).webkitSlice;
+
+    const chunks = Math.ceil(file.size / CHUNK_SIZE);
+    let currentChunk = 0;
+    const spark = new SparkMD5.ArrayBuffer();
+    const fileReader = new FileReader();
+
+    fileReader.onload = function (e) {
+      if (e.target?.result) spark.append(e.target.result as ArrayBuffer);
+      currentChunk++;
+      if (currentChunk < chunks) loadNext();
+      else resolve(spark.end());
+    };
+
+    fileReader.onerror = function () {
+      reject(new Error('MD5 calculation failed'));
+    };
+
+    function loadNext() {
+      const start = currentChunk * CHUNK_SIZE;
+      const end = Math.min(start + CHUNK_SIZE, file.size);
+      fileReader.readAsArrayBuffer(blobSlice.call(file, start, end));
+    }
+
+    loadNext();
+  });
+};
+
 const Chat: React.FC = () => {
   const { conversationId: urlConversationId } = useParams();
   const { refreshConversations } = useOutletContext<LayoutContext>();
+  const localConversationIdRef = useRef(
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `conv_${Date.now()}_${Math.random().toString(16).slice(2)}`
+  );
+  const wsSessionRef = useRef(0);
   
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>([
@@ -24,28 +66,44 @@ const Chat: React.FC = () => {
     }
   ]);
   const [loading, setLoading] = useState(false);
-  const [conversationId, setConversationId] = useState(() => urlConversationId || `conv_${Date.now()}`);
+  const conversationId = urlConversationId || localConversationIdRef.current;
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const currentMessageRef = useRef<string>('');
+  const loadingRef = useRef(false);
+  const pendingResponseTimerRef = useRef<number | null>(null);
+  const [uploadingFileName, setUploadingFileName] = useState<string | null>(null);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadError, setUploadError] = useState('');
+  const [uploadSuccess, setUploadSuccess] = useState('');
+  const [latestUploadedFileName, setLatestUploadedFileName] = useState<string>('');
+  const visibleMessages = messages.filter(
+    (msg) => !(msg.role === 'assistant' && (msg.content || '').trim().length === 0)
+  );
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  const clearPendingResponseTimer = () => {
+    if (pendingResponseTimerRef.current !== null) {
+      window.clearTimeout(pendingResponseTimerRef.current);
+      pendingResponseTimerRef.current = null;
+    }
   };
 
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
 
-  // 当 URL 参数变化时更新会话 ID
   useEffect(() => {
-    if (urlConversationId && urlConversationId !== conversationId) {
-      setConversationId(urlConversationId);
-    }
-  }, [urlConversationId, conversationId]);
+    loadingRef.current = loading;
+  }, [loading]);
 
-  // 加载历史会话
+
+  // Load conversation history
   const loadConversationHistory = useCallback(async (convId: string) => {
     try {
       const response = await conversationApi.getHistory(convId);
@@ -76,27 +134,30 @@ const Chat: React.FC = () => {
     }
   }, []);
 
-  // WebSocket 连接管理
+  // WebSocket connection management
   useEffect(() => {
-    // 关闭旧连接
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+    const sessionId = ++wsSessionRef.current;
+    // Close the old connection
+    if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) {
       wsRef.current.close();
     }
 
-    // 如果有 URL 参数，加载历史
+    // If a URL parameter exists, load history
     if (urlConversationId) {
       loadConversationHistory(urlConversationId);
     }
 
-    // 创建新 WebSocket 连接
+    // Create a new WebSocket connection
     const ws = chatApi.createWebSocket(conversationId);
     wsRef.current = ws;
 
     ws.onopen = () => {
+      if (wsSessionRef.current !== sessionId) return;
       console.log('✅ WebSocket connected:', conversationId);
     };
 
     ws.onmessage = (event) => {
+      if (wsSessionRef.current !== sessionId) return;
       try {
         const data = JSON.parse(event.data);
         
@@ -108,11 +169,17 @@ const Chat: React.FC = () => {
             content: `Error: ${data.error}`,
             timestamp: Date.now()
           }]);
+          loadingRef.current = false;
           setLoading(false);
           return;
         }
 
-        if (data.chunk) {
+        if (typeof data.chunk === 'string' && data.chunk.length > 0) {
+          // Ignore late chunks after completion and avoid creating empty bubbles
+          // from leading whitespace-only tokens.
+          if (!loadingRef.current && currentMessageRef.current.length === 0) return;
+          if (currentMessageRef.current.length === 0 && data.chunk.trim().length === 0) return;
+
           currentMessageRef.current += data.chunk;
           
           setMessages(prev => {
@@ -135,26 +202,31 @@ const Chat: React.FC = () => {
         }
 
         if (data.type === 'completion' && data.status === 'finished') {
-          console.log('✅ Response completed', data.source_files);
+          console.log('✅ Response completed');
           setMessages(prev => {
             const newMessages = [...prev];
             const lastMsg = newMessages[newMessages.length - 1];
             
             if (lastMsg && lastMsg.id === 'streaming') {
               lastMsg.id = Date.now().toString();
-              // 添加源文件列表
-              if (data.source_files && data.source_files.length > 0) {
-                lastMsg.source_files = data.source_files;
-              }
+            } else if (data.response) {
+              newMessages.push({
+                id: Date.now().toString(),
+                role: 'assistant',
+                content: data.response,
+                timestamp: Date.now()
+              });
             }
-            
+
             return newMessages;
           });
           
           currentMessageRef.current = '';
+          clearPendingResponseTimer();
+          loadingRef.current = false;
           setLoading(false);
           
-          // 刷新会话列表
+          // Refresh the conversation list
           refreshConversations?.();
         }
       } catch (error) {
@@ -163,17 +235,38 @@ const Chat: React.FC = () => {
     };
 
     ws.onerror = (error) => {
-      console.error('❌ WebSocket error:', error);
-      setLoading(false);
+      if (wsSessionRef.current !== sessionId) return;
+      console.error('WebSocket error:', error);
+      clearPendingResponseTimer();
+      const wasLoading = loadingRef.current;
+      loadingRef.current = false;
+      if (wasLoading) {
+        loadConversationHistory(conversationId).finally(() => setLoading(false));
+      } else {
+        setLoading(false);
+      }
     };
 
     ws.onclose = () => {
-      console.log('🔌 WebSocket disconnected');
+      if (wsSessionRef.current !== sessionId) return;
+      console.log('WebSocket disconnected');
+      clearPendingResponseTimer();
+      const wasLoading = loadingRef.current;
+      loadingRef.current = false;
+      if (wasLoading) {
+        loadConversationHistory(conversationId).finally(() => setLoading(false));
+      } else {
+        setLoading(false);
+      }
     };
 
     return () => {
-      if (ws.readyState === WebSocket.OPEN) {
+      clearPendingResponseTimer();
+      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
         ws.close();
+      }
+      if (wsRef.current === ws) {
+        wsRef.current = null;
       }
     };
   }, [conversationId, urlConversationId, loadConversationHistory, refreshConversations]);
@@ -181,26 +274,42 @@ const Chat: React.FC = () => {
   const handleSend = async () => {
     if (!input.trim() || loading) return;
 
+    const rawInput = input.trim();
+    const latestFileIntent = /(this file|uploaded file|latest file|that file)/i.test(rawInput);
+    const outgoingContent =
+      latestFileIntent && latestUploadedFileName
+        ? `${rawInput} (uploaded file: ${latestUploadedFileName})`
+        : rawInput;
+
     const userMsg: ChatMessage = {
       id: Date.now().toString(),
       role: 'user',
-      content: input,
+      content: rawInput,
       timestamp: Date.now()
     };
 
     setMessages(prev => [...prev, userMsg]);
     setInput('');
     setLoading(true);
+    loadingRef.current = true;
     currentMessageRef.current = '';
+    clearPendingResponseTimer();
+    pendingResponseTimerRef.current = window.setTimeout(() => {
+      if (!loadingRef.current) return;
+      loadingRef.current = false;
+      loadConversationHistory(conversationId).finally(() => setLoading(false));
+    }, 45000);
 
     try {
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        chatApi.sendMessageViaWebSocket(wsRef.current, userMsg.content);
+        chatApi.sendMessageViaWebSocket(wsRef.current, outgoingContent);
       } else {
         throw new Error('WebSocket not connected');
       }
     } catch (error) {
       console.error('❌ Failed to send message:', error);
+      clearPendingResponseTimer();
+      loadingRef.current = false;
       setMessages(prev => [...prev, {
         id: Date.now().toString(),
         role: 'assistant',
@@ -211,22 +320,81 @@ const Chat: React.FC = () => {
     }
   };
 
+  const handleFileUpload = async (file: File) => {
+    setUploadError('');
+    setUploadSuccess('');
+    setUploadingFileName(file.name);
+    setUploadProgress(0);
+
+    try {
+      const fileMd5 = await calculateMD5(file);
+      const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+      let uploadedChunks: number[] = [];
+
+      try {
+        const status = await fileApi.checkStatus(fileMd5);
+        if (status?.data?.uploaded) {
+          uploadedChunks = status.data.uploaded;
+        }
+      } catch {
+        // Ignore; upload may be new
+      }
+
+      setUploadProgress(Math.round((uploadedChunks.length / totalChunks) * 100));
+
+      for (let i = 0; i < totalChunks; i++) {
+        if (uploadedChunks.includes(i)) continue;
+
+        const start = i * CHUNK_SIZE;
+        const end = Math.min(start + CHUNK_SIZE, file.size);
+        const chunk = file.slice(start, end);
+
+        await fileApi.uploadChunk(chunk, {
+          fileMd5,
+          chunkIndex: i,
+          totalSize: file.size,
+          fileName: file.name,
+          totalChunks,
+        });
+
+        uploadedChunks.push(i);
+        setUploadProgress(Math.round((uploadedChunks.length / totalChunks) * 100));
+      }
+
+      await fileApi.merge(fileMd5, file.name);
+      await conversationApi.attachFile(conversationId, fileMd5, file.name);
+      setLatestUploadedFileName(file.name);
+      setUploadSuccess(`Added ${file.name}. Chat is now scoped to this file.`);
+    } catch (error: any) {
+      setUploadError(error?.message || 'Failed to upload file');
+    } finally {
+      setUploadingFileName(null);
+    }
+  };
+
+  const onPickFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    await handleFileUpload(file);
+    e.target.value = '';
+  };
+
   return (
     <div className="flex flex-col h-full bg-white">
       {/* Header */}
       <header className="px-6 py-4 border-b border-gray-200 flex items-center justify-between bg-white z-10">
         <h2 className="font-semibold text-gray-800 flex items-center gap-2">
-          <Bot className="w-5 h-5 text-blue-600" />
+          <Bot className="w-5 h-5 text-neutral-800" />
           AI Assistant
         </h2>
         <div className="text-xs text-gray-400">
-          {messages.length > 1 ? `${messages.length} messages` : 'New conversation'}
+          {visibleMessages.length > 1 ? `${visibleMessages.length} messages` : 'New conversation'}
         </div>
       </header>
 
       {/* Messages Area */}
       <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-gray-50">
-        {messages.map((msg) => (
+        {visibleMessages.map((msg) => (
           <div
             key={msg.id}
             className={clsx(
@@ -237,7 +405,7 @@ const Chat: React.FC = () => {
             {/* Avatar */}
             <div className={clsx(
               "w-10 h-10 rounded-full flex items-center justify-center shrink-0 shadow-sm",
-              msg.role === 'user' ? "bg-gray-800" : "bg-blue-600"
+              msg.role === 'user' ? "bg-gray-800" : "bg-neutral-800"
             )}>
               {msg.role === 'user' ? <User className="w-5 h-5 text-white" /> : <Bot className="w-5 h-5 text-white" />}
             </div>
@@ -288,13 +456,6 @@ const Chat: React.FC = () => {
                 )}
               </div>
 
-              {/* RAG Source Files */}
-              {msg.source_files && msg.source_files.length > 0 && (
-                <div className="w-full mt-2">
-                  <SourceFilesList files={msg.source_files} />
-                </div>
-              )}
-              
               {/* RAG Sources (detailed) */}
               {msg.sources && msg.sources.length > 0 && (
                 <div className="w-full mt-2">
@@ -310,13 +471,13 @@ const Chat: React.FC = () => {
         ))}
         {loading && messages[messages.length - 1]?.id !== 'streaming' && (
           <div className="flex gap-4 max-w-4xl mx-auto">
-            <div className="w-10 h-10 rounded-full bg-blue-600 flex items-center justify-center shrink-0">
+            <div className="w-10 h-10 rounded-full bg-neutral-800 flex items-center justify-center shrink-0">
               <Bot className="w-5 h-5 text-white" />
             </div>
             <div className="flex items-center gap-1 bg-white px-4 py-3 rounded-2xl rounded-tl-none border border-gray-100">
-              <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-              <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-              <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+              <div className="w-2 h-2 bg-neutral-800 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+              <div className="w-2 h-2 bg-neutral-800 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+              <div className="w-2 h-2 bg-neutral-800 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
             </div>
           </div>
         )}
@@ -326,6 +487,26 @@ const Chat: React.FC = () => {
       {/* Input Area */}
       <div className="p-4 bg-white border-t border-gray-200">
         <div className="max-w-4xl mx-auto relative">
+          <div className="mb-2 flex items-center gap-3">
+            <input
+              ref={fileInputRef}
+              type="file"
+              className="hidden"
+              onChange={onPickFile}
+              disabled={Boolean(uploadingFileName)}
+            />
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={Boolean(uploadingFileName)}
+              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {uploadingFileName ? <Loader2 className="w-4 h-4 animate-spin" /> : <Paperclip className="w-4 h-4" />}
+              {uploadingFileName ? `Uploading ${uploadingFileName} (${uploadProgress}%)` : 'Add file'}
+            </button>
+            {uploadError && <span className="text-xs text-red-600">{uploadError}</span>}
+            {uploadSuccess && <span className="text-xs text-green-600">{uploadSuccess}</span>}
+          </div>
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -349,33 +530,6 @@ const Chat: React.FC = () => {
         </div>
         <div className="text-center text-xs text-gray-400 mt-2">
           <p>AI can make mistakes. Check important info.</p>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-// Component to display source files list
-const SourceFilesList = ({ files }: { files: string[] }) => {
-  return (
-    <div className="border border-gray-200 rounded-lg bg-white overflow-hidden">
-      <div className="p-3 bg-gray-50">
-        <div className="flex items-center gap-2 text-xs font-medium text-gray-600">
-          <Book className="w-4 h-4 text-blue-500" />
-          <span>Sources: {files.length} file{files.length > 1 ? 's' : ''} used</span>
-        </div>
-      </div>
-      <div className="p-3 pt-2">
-        <div className="flex flex-wrap gap-2">
-          {files.map((file, idx) => (
-            <span
-              key={idx}
-              className="text-xs px-2 py-1 bg-blue-50 text-blue-700 rounded border border-blue-200 flex items-center gap-1"
-            >
-              <Book className="w-3 h-3" />
-              {file}
-            </span>
-          ))}
         </div>
       </div>
     </div>
@@ -433,3 +587,8 @@ const SourcesAccordion = ({ sources }: { sources: SearchResult[] }) => {
 };
 
 export default Chat;
+
+
+
+
+

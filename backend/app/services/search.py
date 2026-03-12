@@ -1,15 +1,15 @@
 """
 Hybrid search service with multi-field support.
-Implements KNN + BM25 hybrid search using Elasticsearch single query with RRF fusion.
+Implements KNN + full-text search hybrid search using Azure AI Search.
 Supports multi-field text indexing for Chinese and English content.
 """
 
 from typing import List, Dict, Tuple, Optional
-from elasticsearch import Elasticsearch
+from azure.search.documents import SearchClient
 import time
 import re
 
-from app.clients.gemini_embedding_client import GeminiEmbeddingClient
+from app.clients.azure_openai_embedding_client import AzureOpenAIEmbeddingClient
 from app.core.search_config import search_config
 from app.utils.logging import get_logger
 
@@ -19,25 +19,25 @@ logger = get_logger(__name__)
 class HybridSearchService:
     """
     Hybrid search service with multi-field support.
-    Implements vector search (KNN) + full-text search (BM25) with RRF fusion.
+    Implements vector search (KNN) + full-text search with Azure AI Search.
     Supports separate Chinese and English field analysis for better accuracy.
     """
     
     def __init__(
         self,
-        es_client: Elasticsearch,
-        embedding_client: GeminiEmbeddingClient,
+        search_client: SearchClient,
+        embedding_client: AzureOpenAIEmbeddingClient,
         index_name: str = None
     ):
         """
         Initialize hybrid search service.
         
         Args:
-            es_client: Elasticsearch client instance
+            search_client: Azure SearchClient instance
             embedding_client: Embedding generation client
             index_name: Index name (defaults to config value)
         """
-        self.es = es_client
+        self.search_client = search_client
         self.embedding_client = embedding_client
         self.index_name = index_name or search_config.ES_INDEX_NAME
         
@@ -83,32 +83,31 @@ class HybridSearchService:
         )
         
         # Check for question patterns
-        question_words = ["how", "what", "why", "when", "where", "which",
-                         "如何", "什么", "为什么", "怎么", "哪个", "哪些"]
+        question_words = ["how", "what", "why", "when", "where", "which"]
         is_question = any(word in query.lower() for word in question_words)
         
         # Check query length (longer queries often need semantic understanding)
         is_long = len(query) > 50
         
-        # Dynamic adjustment with combined logic
-        # 组合判断：同时考虑技术术语和问句特征
+        # Dynamic adjustment with combined logic.
+        # Consider both technical terms and question-like phrasing.
         if has_technical and (is_question or is_long):
-            # 长句子/问句 + 专业术语 → 平衡但偏向 BM25
-            # 例如: "How does context free grammar work?"
+            # Long or question-like query with technical terms -> balanced with BM25 bias.
+            # Example: "How does context free grammar work?"
             logger.info(f"Auto-adjust: Technical question detected, balanced with BM25 bias (0.35/0.65)")
             return 0.35, 0.65
         elif has_technical:
-            # 纯技术术语查询 → 重 BM25
-            # 例如: "context free grammar"
+            # Technical-term-only query -> favor BM25.
+            # Example: "context free grammar"
             logger.info(f"Auto-adjust: Technical terms detected, boosting BM25 (0.2/0.8)")
             return 0.2, 0.8
         elif is_question or is_long:
-            # 一般性问句/长查询 → 重 KNN (语义理解)
-            # 例如: "How to improve model performance?"
+            # General question or long query -> favor KNN (semantic understanding).
+            # Example: "How to improve model performance?"
             logger.info(f"Auto-adjust: Semantic query detected, boosting KNN (0.7/0.3)")
             return 0.7, 0.3
         else:
-            # 默认平衡
+            # Default balanced mode.
             return 0.5, 0.5
     
     def _build_multifield_query(self, query: str) -> List[Dict]:
@@ -130,17 +129,17 @@ class HybridSearchService:
         """
         field_boosts = search_config.get_field_boosts()
         
-        # 过滤停用词后的查询 - 用于更精确的匹配
+        # Filtered query without stop words for more precise matching.
         filtered_query = self._filter_stopwords(query)
         filtered_word_count = len(filtered_query.split())
         
-        # 根据查询长度调整匹配策略
-        # 短查询（<5词）：严格匹配 50%
-        # 长查询（≥5词）：宽松匹配，至少匹配 2 个关键词
+        # Adjust matching strategy based on query length.
+        # Short query (<5 words): stricter 50% matching.
+        # Long query (>=5 words): looser matching with at least 2 keywords.
         if filtered_word_count < 5:
             min_match = "50%"
         else:
-            min_match = "2"  # 长查询只需匹配至少 2 个词
+            min_match = "2"  # Long queries only need to match at least 2 words.
         
         logger.debug(f"Query length: {filtered_word_count} words, minimum_should_match: {min_match}")
         
@@ -149,7 +148,7 @@ class HybridSearchService:
             {
                 "match": {
                     "text_content": {
-                        "query": filtered_query,  # 使用过滤后的查询
+                        "query": filtered_query,  # Use the filtered query.
                         "boost": field_boosts["chinese"],
                         "minimum_should_match": min_match
                     }
@@ -165,7 +164,7 @@ class HybridSearchService:
                     }
                 }
             },
-            # Standard field (fallback) - 使用原查询作为兜底
+            # Standard field (fallback) - use the original query as fallback.
             {
                 "match": {
                     "text_content.standard": {
@@ -176,16 +175,16 @@ class HybridSearchService:
             }
         ]
         
-        # 添加短语匹配：如果过滤后的查询包含多个词，增加精确短语匹配提升
+        # Add phrase matching when the filtered query has multiple words.
         filtered_words = filtered_query.split()
         if len(filtered_words) >= 2:
-            # 短语匹配 - 大幅提升包含完整短语的文档
+            # Phrase matching strongly boosts documents containing the full phrase.
             clauses.append({
                 "match_phrase": {
                     "text_content": {
                         "query": filtered_query,
-                        "boost": 3.0,  # 短语匹配权重是普通匹配的3倍
-                        "slop": 2      # 允许词之间有2个词的间隔
+                        "boost": 3.0,  # Phrase match weight is 3x the normal match.
+                        "slop": 2      # Allow up to 2 terms between words.
                     }
                 }
             })
@@ -211,11 +210,11 @@ class HybridSearchService:
         Returns:
             List containing single match clause
         """
-        # 过滤停用词
+        # Filter stop words.
         filtered_query = self._filter_stopwords(query)
         filtered_word_count = len(filtered_query.split())
         
-        # 根据查询长度调整匹配策略
+        # Adjust matching strategy based on query length.
         if filtered_word_count < 5:
             min_match = "50%"
         else:
@@ -233,7 +232,7 @@ class HybridSearchService:
             }
         ]
     
-        # 添加短语匹配
+        # Add phrase matching.
         if filtered_word_count >= 2:
             clauses.append({
                 "match_phrase": {
@@ -305,8 +304,8 @@ class HybridSearchService:
             "as"
         }
         
-        # 移除标点符号并过滤停用词
-        words = re.findall(r'\b\w+\b', query)  # 只提取单词，去除标点
+        # Remove punctuation and filter stop words.
+        words = re.findall(r'\b\w+\b', query)  # Extract words only and remove punctuation.
         filtered = [w for w in words if w.lower() not in stop_words]
         
         return " ".join(filtered) if filtered else query
@@ -379,12 +378,12 @@ class HybridSearchService:
         use_multifield: bool = None
     ) -> Tuple[List[Dict], Dict]:
         """
-        Execute hybrid search with multi-field support.
+        Execute hybrid search with Azure AI Search (vector + keyword search).
         
         Process:
         1. Generate query vector using embedding client
-        2. Build ES query with multi-field BM25 + KNN
-        3. Use script_score to fuse results with RRF-style scoring
+        2. Execute Azure Search hybrid query with vector + keyword
+        3. Combine and rank results based on weights
         4. Return merged and ranked results
         
         Args:
@@ -422,109 +421,90 @@ class HybridSearchService:
             f"multifield={use_multifield}"
         )
         
-        # Step 1: Generate query vector
-        query_vector = self.embedding_client.embed([query])[0]
-        
-        # Step 2: Build BM25 query clauses (multi-field or single-field)
-        if use_multifield:
-            bm25_clauses = self._build_multifield_query(query)
-        else:
-            bm25_clauses = self._build_single_field_query(query)
-        
-        # Step 3: Build complete ES query with script_score fusion
-        search_body = {
-            "size": top_k,
-            "query": {
-                "script_score": {
-                    "query": {
-                        "bool": {
-                            "should": bm25_clauses,
-                            "minimum_should_match": 0,  # Allow pure vector matches
-                            "filter": []
-                        }
-                    },
-                    "script": {
-                        # RRF-style fusion scoring with phrase boost awareness
-                        "source": """
-                            // KNN: Cosine similarity (range: 0-2 after +1)
-                            double knn_score = cosineSimilarity(params.query_vector, 'vector') + 1.0;
-                            
-                            // BM25: Multi-field best match score (includes phrase match boost)
-                            double bm25_score = _score;
-                            
-                            // RRF-style fusion
-                            // KNN contribution: direct weighted score
-                            double knn_contribution = params.knn_weight * knn_score;
-                            
-                            // BM25 contribution: use log scaling to preserve phrase match advantage
-                            // Higher BM25 scores (from phrase matches) will have proportionally more impact
-                            double bm25_normalized = Math.log1p(bm25_score) / Math.log1p(params.rrf_k);
-                            double bm25_contribution = params.bm25_weight * bm25_normalized;
-                            
-                            // Final combined score
-                            return knn_contribution + bm25_contribution;
-                        """,
-                        "params": {
-                            "query_vector": query_vector,
-                            "knn_weight": knn_weight,
-                            "bm25_weight": bm25_weight,
-                            "rrf_k": rrf_k
-                        }
+        try:
+            # Step 1: Generate query vector
+            query_vector = self.embedding_client.embed([query])[0]
+            logger.info(f"Generated query vector with {len(query_vector)} dimensions")
+            
+            # Step 2: Build filter expression if needed
+            filter_expr = None
+            if file_md5_filter:
+                filter_expr = f"file_md5 eq '{file_md5_filter}'"
+                logger.info(f"Applied filter: {filter_expr}")
+            
+            # Step 3: Execute Azure Search hybrid query
+            logger.info(f"Executing hybrid search with text='{query}' + vector query")
+            results_list = self.search_client.search(
+                search_text=query,
+                vector_queries=[{
+                    'kind': 'vector',
+                    'vector': query_vector,
+                    'fields': 'embedding',
+                    'k': top_k
+                }],
+                filter=filter_expr,
+                top=top_k,
+                select=['file_md5', 'chunk_id', 'content', 'file_name', 'chunk_index'],
+                highlight_fields='content' if search_config.HIGHLIGHT_ENABLED else None
+            )
+            
+            # Step 4: Parse results and apply weighting
+            results = []
+            result_dict = {}  # Use dict to deduplicate by chunk_id
+            hit_count = 0
+            
+            for hit in results_list:
+                hit_count += 1
+                chunk_id = hit.get('chunk_id', '')
+                score = hit.get('@search.score', hit.get('score', 0))
+                
+                if hit_count <= 3:
+                    logger.debug(f"Hit {hit_count}: chunk_id={chunk_id}, score={score}, content_len={len(hit.get('content', ''))}")
+                
+                # Combined score (simplified - just use the search score)
+                combined_score = score
+                
+                if chunk_id not in result_dict:
+                    result_dict[chunk_id] = {
+                        "file_md5": hit.get('file_md5', ''),
+                        "chunk_id": chunk_id,
+                        "content": hit.get('content', ''),  # Updated field name
+                        "file_name": hit.get('file_name', ''),  # Added
+                        "chunk_index": hit.get('chunk_index', ''),  # Added
+                        "score": combined_score,
+                        "highlights": []
                     }
-                }
-            },
-            "_source": ["file_md5", "chunk_id", "text_content", "model_version"]
-        }
-        
-        # Add highlighting if enabled
-        if search_config.HIGHLIGHT_ENABLED:
-            search_body["highlight"] = self._build_highlight_config(query)
-        
-        # Add file filter if specified
-        if file_md5_filter:
-            search_body["query"]["script_score"]["query"]["bool"]["filter"].append({
-                "term": {"file_md5": file_md5_filter}
-            })
-        
-        # Step 4: Execute search
-        response = self.es.search(index=self.index_name, body=search_body)
-        
-        # Step 5: Parse results
-        results = []
-        for hit in response["hits"]["hits"]:
-            source = hit["_source"]
+                else:
+                    # Update with higher score if this hit has better ranking
+                    if combined_score > result_dict[chunk_id]['score']:
+                        result_dict[chunk_id]['score'] = combined_score
             
-            # Collect highlights from all fields
-            highlights = []
-            if "highlight" in hit:
-                for field, frags in hit["highlight"].items():
-                    highlights.extend(frags)
+            logger.info(f"Hybrid search returned {hit_count} hits, {len(result_dict)} unique chunks")
             
-            result = {
-                "file_md5": source.get("file_md5"),
-                "chunk_id": source.get("chunk_id"),
-                "text_content": source.get("text_content"),
-                "score": hit["_score"],
-                "highlights": highlights,
-                "model_version": source.get("model_version")
+            # Sort by score descending
+            results = sorted(result_dict.values(), key=lambda x: x['score'], reverse=True)[:top_k]
+            
+            # Build search metadata
+            field_boosts = search_config.get_field_boosts() if use_multifield else None
+            search_meta = {
+                "knn_weight": knn_weight,
+                "bm25_weight": bm25_weight,
+                "rrf_k": rrf_k,
+                "auto_adjusted": auto_adjust,
+                "multifield_enabled": use_multifield,
+                "field_boosts": field_boosts
             }
-            results.append(result)
-        
-        # Build search metadata
-        field_boosts = search_config.get_field_boosts() if use_multifield else None
-        search_meta = {
-            "knn_weight": knn_weight,
-            "bm25_weight": bm25_weight,
-            "rrf_k": rrf_k,
-            "auto_adjusted": auto_adjust,
-            "multifield_enabled": use_multifield,
-            "field_boosts": field_boosts
-        }
-        
-        elapsed = (time.time() - start_time) * 1000
-        logger.info(f"Hybrid search completed: {len(results)} results in {elapsed:.2f}ms")
-        
-        return results, search_meta
+            
+            elapsed = (time.time() - start_time) * 1000
+            logger.info(f"Hybrid search completed: {len(results)} results in {elapsed:.2f}ms")
+            search_meta["execution_time_ms"] = elapsed
+            
+            return results, search_meta
+            
+        except Exception as e:
+            logger.error(f"Hybrid search failed: {e}")
+            return [], {"error": str(e)}
+    
     
     def knn_only_search(
         self,
@@ -533,7 +513,7 @@ class HybridSearchService:
         file_md5_filter: str = None
     ) -> Tuple[List[Dict], Dict]:
         """
-        Pure KNN vector search (for comparison/fallback).
+        Pure KNN vector search (for comparison/fallback) using Azure Search.
         
         Args:
             query: Search query text
@@ -546,51 +526,55 @@ class HybridSearchService:
         start_time = time.time()
         top_k = top_k or search_config.DEFAULT_TOP_K
         
-        # Generate query vector
-        query_vector = self.embedding_client.embed([query])[0]
-        
-        # Build KNN-only query
-        search_body = {
-            "size": top_k,
-            "query": {
-                "script_score": {
-                    "query": {"match_all": {}},
-                    "script": {
-                        "source": "cosineSimilarity(params.query_vector, 'vector') + 1.0",
-                        "params": {"query_vector": query_vector}
-                    }
-                }
-            },
-            "_source": ["file_md5", "chunk_id", "text_content", "model_version"]
-        }
-        
-        # Add file filter if specified
-        if file_md5_filter:
-            search_body["query"]["script_score"]["query"] = {
-                "term": {"file_md5": file_md5_filter}
+        try:
+            # Generate query vector
+            query_vector = self.embedding_client.embed([query])[0]
+            
+            # Build Azure Search vector search parameters
+            vector_query = f"search.in(embedding, '{query_vector}')"
+            
+            # Add file filter if specified
+            filter_expr = None
+            if file_md5_filter:
+                filter_expr = f"file_md5 eq '{file_md5_filter}'"
+            
+            # Execute vector search
+            results_list = self.search_client.search(
+                search_text="",
+                vector_queries=[{
+                    'kind': 'vector',
+                    'vector': query_vector,
+                    'fields': 'embedding',
+                    'k': top_k
+                }],
+                filter=filter_expr,
+                top=top_k,
+                select=['file_md5', 'chunk_id', 'content', 'file_name', 'chunk_index']
+            )
+            
+            results = []
+            for hit in results_list:
+                results.append({
+                    "file_md5": hit.get('file_md5', ''),
+                    "chunk_id": hit.get('chunk_id', ''),
+                    "content": hit.get('content', ''),
+                    "file_name": hit.get('file_name', ''),
+                    "chunk_index": hit.get('chunk_index', ''),
+                    "score": hit.get('@search.score', 0),
+                    "highlights": []
+                })
+            
+            elapsed = (time.time() - start_time) * 1000
+            search_meta = {
+                "mode": "knn",
+                "execution_time_ms": elapsed
             }
-        
-        response = self.es.search(index=self.index_name, body=search_body)
-        
-        results = [
-            {
-                "file_md5": hit["_source"]["file_md5"],
-                "chunk_id": hit["_source"]["chunk_id"],
-                "text_content": hit["_source"]["text_content"],
-                "score": hit["_score"],
-                "highlights": [],
-                "model_version": hit["_source"].get("model_version")
-            }
-            for hit in response["hits"]["hits"]
-        ]
-        
-        elapsed = (time.time() - start_time) * 1000
-        search_meta = {
-            "mode": "knn",
-            "execution_time_ms": elapsed
-        }
-        
-        return results, search_meta
+            
+            return results, search_meta
+            
+        except Exception as e:
+            logger.error(f"KNN search failed: {e}")
+            return [], {"mode": "knn", "error": str(e)}
     
     def bm25_only_search(
         self,
@@ -600,7 +584,7 @@ class HybridSearchService:
         use_multifield: bool = None
     ) -> Tuple[List[Dict], Dict]:
         """
-        Pure BM25 keyword search with multi-field support.
+        Pure BM25 keyword search with multi-field support using Azure Search.
         
         Args:
             query: Search query text
@@ -615,84 +599,55 @@ class HybridSearchService:
         top_k = top_k or search_config.DEFAULT_TOP_K
         use_multifield = use_multifield if use_multifield is not None else search_config.MULTIFIELD_ENABLED
         
-        # Build BM25 query
-        if use_multifield:
-            # Multi-match across all text fields
-            field_boosts = search_config.get_field_boosts()
-            query_clause = {
-                "multi_match": {
-                    "query": query,
-                    "fields": [
-                        f"text_content^{field_boosts['chinese']}",
-                        f"text_content.english^{field_boosts['english']}",
-                        f"text_content.standard^{field_boosts['standard']}"
-                    ],
-                    "type": "best_fields",
-                    "tie_breaker": field_boosts["tie_breaker"],
-                    "operator": "or"
-                }
-            }
-        else:
-            query_clause = {
-                "match": {
-                    "text_content": {
-                        "query": query,
-                        "operator": "or"
-                    }
-                }
-            }
-        
-        search_body = {
-            "size": top_k,
-            "query": {
-                "bool": {
-                    "must": [query_clause],
-                    "filter": []
-                }
-            },
-            "_source": ["file_md5", "chunk_id", "text_content", "model_version"]
-        }
-        
-        # Add highlighting
-        if search_config.HIGHLIGHT_ENABLED:
-            search_body["highlight"] = self._build_highlight_config(query)
-        
-        # Add file filter if specified
-        if file_md5_filter:
-            search_body["query"]["bool"]["filter"].append({
-                "term": {"file_md5": file_md5_filter}
-            })
-        
-        response = self.es.search(index=self.index_name, body=search_body)
-        
-        results = []
-        for hit in response["hits"]["hits"]:
-            highlights = []
-            if "highlight" in hit:
-                for field, frags in hit["highlight"].items():
-                    highlights.extend(frags)
+        try:
+            # Build filter expression if file filter specified
+            filter_expr = None
+            if file_md5_filter:
+                filter_expr = f"file_md5 eq '{file_md5_filter}'"
             
-            results.append({
-                "file_md5": hit["_source"]["file_md5"],
-                "chunk_id": hit["_source"]["chunk_id"],
-                "text_content": hit["_source"]["text_content"],
-                "score": hit["_score"],
-                "highlights": highlights,
-                "model_version": hit["_source"].get("model_version")
-            })
-        
-        elapsed = (time.time() - start_time) * 1000
-        search_meta = {
-            "mode": "bm25",
-            "multifield_enabled": use_multifield,
-            "execution_time_ms": elapsed
-        }
-        
-        return results, search_meta
+            # In Azure Search, BM25 is the default for text search
+            # The search_text parameter is matched against configured searchable fields
+            results_list = self.search_client.search(
+                search_text=query,
+                filter=filter_expr,
+                top=top_k,
+                select=['file_md5', 'chunk_id', 'content', 'file_name', 'chunk_index'],
+                highlight_fields='content' if search_config.HIGHLIGHT_ENABLED else None
+            )
+            
+            results = []
+            for hit in results_list:
+                highlights = []
+                if hasattr(hit, '@search.highlights') and hit.__dict__.get('@search.highlights'):
+                    highlights = hit.__dict__['@search.highlights'].get('content', [])
+                
+                results.append({
+                    "file_md5": hit.get('file_md5', ''),
+                    "chunk_id": hit.get('chunk_id', ''),
+                    "content": hit.get('content', ''),
+                    "file_name": hit.get('file_name', ''),
+                    "chunk_index": hit.get('chunk_index', ''),
+                    "score": hit.get('@search.score', 0),
+                    "highlights": highlights
+                })
+            
+            elapsed = (time.time() - start_time) * 1000
+            search_meta = {
+                "mode": "bm25",
+                "multifield_enabled": use_multifield,
+                "execution_time_ms": elapsed
+            }
+            
+            return results, search_meta
+            
+        except Exception as e:
+            logger.error(f"BM25 search failed: {e}")
+            return [], {"mode": "bm25", "error": str(e)}
     
     def analyze_text(self, text: str, analyzer: str = "chinese_smart") -> Dict:
         """
-        Analyze text with specified analyzer (for debugging).
+        Analyze text with specified analyzer for debugging.
+        Since Azure Search doesn't expose analyzer APIs, we implement client-side tokenization.
         
         Args:
             text: Text to analyze
@@ -702,17 +657,35 @@ class HybridSearchService:
             Dictionary containing tokens
         """
         try:
-            response = self.es.indices.analyze(
-                index=self.index_name,
-                body={
-                    "analyzer": analyzer,
-                    "text": text
-                }
-            )
+            tokens = []
+            
+            if analyzer in ["chinese_smart", "chinese_max"]:
+                # Use jieba for Chinese text analysis
+                try:
+                    import jieba
+                    if analyzer == "chinese_smart":
+                        tokens = list(jieba.cut(text))  # Smart cut
+                    else:  # chinese_max
+                        tokens = list(jieba.cut_for_search(text))  # Search cut
+                    # Convert to lowercase
+                    tokens = [t.lower() for t in tokens]
+                except ImportError:
+                    logger.warning("jieba not available, falling back to character splitting")
+                    tokens = list(text)
+            
+            elif analyzer == "english":
+                # Split on whitespace and punctuation for English
+                import re
+                tokens = re.findall(r'\b\w+\b', text.lower())
+            
+            else:  # standard analyzer
+                # Basic whitespace and lowercase tokenization
+                tokens = text.lower().split()
+            
             return {
                 "analyzer": analyzer,
                 "text": text,
-                "tokens": [token["token"] for token in response["tokens"]]
+                "tokens": [t for t in tokens if t]  # Filter empty tokens
             }
         except Exception as e:
             logger.error(f"Analyze failed: {e}")

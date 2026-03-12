@@ -1,13 +1,13 @@
 """
 Multi-field search integration test.
-Tests the complete multi-field search functionality with Elasticsearch.
+Tests the complete multi-field search functionality with Azure AI Search.
 
 Requirements:
-    - Elasticsearch 9.x running
-    - IK Analysis plugin installed (optional but recommended)
+    - Azure AI Search service running
+    - Azure Search admin key configured
 
 Usage:
-    1. Start ES: ./elasticsearch-9.2.0/bin/elasticsearch
+    1. Set AZURE_SEARCH_ENDPOINT and AZURE_SEARCH_ADMIN_KEY environment variables
     2. Run: python tests/test_multifield_search.py
 """
 
@@ -17,37 +17,39 @@ import os
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from elasticsearch import Elasticsearch
+from azure.search.documents import SearchClient
+from azure.core.credentials import AzureKeyCredential
 
 
 # ==================== Configuration ====================
 
-ES_HOST = os.getenv("ES_HOST", "localhost")
-ES_PORT = os.getenv("ES_PORT", "9200")
-ES_USER = os.getenv("ES_USER", "elastic")
-ES_PASSWORD = os.getenv("ES_PASSWORD", "your_password")
+AZURE_SEARCH_ENDPOINT = os.getenv("AZURE_SEARCH_ENDPOINT", "")
+AZURE_SEARCH_KEY = os.getenv("AZURE_SEARCH_ADMIN_KEY", "")
 TEST_INDEX = "test_multifield_index"
 
 
-def get_es_client():
-    """Create ES client (no auth for local testing)"""
-    return Elasticsearch(
-        [f"http://{ES_HOST}:{ES_PORT}"]
-    )
+def get_azure_search_client():
+    """Create Azure Search client"""
+    if not AZURE_SEARCH_ENDPOINT or not AZURE_SEARCH_KEY:
+        raise ValueError("AZURE_SEARCH_ENDPOINT and AZURE_SEARCH_ADMIN_KEY environment variables must be set")
+    
+    credentials = AzureKeyCredential(AZURE_SEARCH_KEY)
+    return SearchClient(endpoint=AZURE_SEARCH_ENDPOINT, index_name=TEST_INDEX, credential=credentials)
 
 
 # ==================== Test Functions ====================
 
-def test_es_connection(es: Elasticsearch) -> bool:
-    """Test Elasticsearch connection"""
+def test_azure_search_connection(client: SearchClient) -> bool:
+    """Test Azure AI Search connection"""
     print("=" * 60)
-    print("Step 1: Test ES Connection")
+    print("Step 1: Test Azure AI Search Connection")
     print("=" * 60)
     
     try:
-        info = es.info()
-        print(f"✅ ES connected successfully!")
-        print(f"   Version: {info['version']['number']}")
+        # Try a simple search to verify connection
+        results = list(client.search(search_text="*", top=1))
+        print(f"✅ Azure AI Search connected successfully!")
+        print(f"   Index: {TEST_INDEX}")
         print(f"   Cluster: {info['cluster_name']}")
         return True
     except Exception as e:
@@ -67,7 +69,7 @@ def test_ik_plugin(es: Elasticsearch) -> bool:
         response = es.indices.analyze(
             body={
                 "tokenizer": "ik_smart",
-                "text": "深度学习模型优化"
+                "text": "deep learning model optimization"
             }
         )
         tokens = [t["token"] for t in response["tokens"]]
@@ -78,7 +80,7 @@ def test_ik_plugin(es: Elasticsearch) -> bool:
         response = es.indices.analyze(
             body={
                 "tokenizer": "ik_max_word",
-                "text": "深度学习模型优化"
+                "text": "deep learning model optimization"
             }
         )
         tokens = [t["token"] for t in response["tokens"]]
@@ -217,13 +219,13 @@ def insert_test_data(es: Elasticsearch):
         {
             "fileMd5": "file002",
             "chunkId": 1,
-            "textContent": "深度学习是人工智能的一个分支，使用神经网络进行模型训练。",
+            "textContent": "Deep learning is a branch of artificial intelligence and uses neural networks for model training.",
             "vector": [0.2] * 768
         },
         {
             "fileMd5": "file002",
             "chunkId": 2,
-            "textContent": "PyTorch 提供了强大的自动微分功能，方便深度学习模型的训练和优化。",
+            "textContent": "PyTorch provides strong automatic differentiation features for training and optimizing deep learning models.",
             "vector": [0.25] * 768
         },
         {
@@ -235,7 +237,7 @@ def insert_test_data(es: Elasticsearch):
         {
             "fileMd5": "file003",
             "chunkId": 2,
-            "textContent": "使用 Adam optimizer 可以实现自适应学习率优化，适合训练深度神经网络。",
+            "textContent": "Using the Adam optimizer enables adaptive learning-rate optimization and works well for training deep neural networks.",
             "vector": [0.35] * 768
         },
     ]
@@ -256,9 +258,9 @@ def test_analyzer_comparison(es: Elasticsearch, use_ik: bool):
     print("=" * 60)
     
     test_texts = [
-        "PyTorch 深度学习模型优化",
+        "PyTorch deep learning model optimization",
         "optimization techniques for neural networks",
-        "使用 Adam optimizer 训练模型"
+        "training a model with the Adam optimizer"
     ]
     
     analyzers = ["standard", "english"]
@@ -295,9 +297,9 @@ def test_multifield_search(es: Elasticsearch):
     
     queries = [
         "PyTorch optimizer",
-        "深度学习 优化",
+        "deep learning optimization",
         "optimization neural network",
-        "Adam 训练"
+        "Adam training"
     ]
     
     for query in queries:
@@ -393,7 +395,7 @@ def test_hybrid_search(es: Elasticsearch):
     print("Step 8: Hybrid Search (KNN + Multi-field BM25)")
     print("=" * 60)
     
-    query = "PyTorch 深度学习"
+    query = "PyTorch deep learning"
     query_vector = [0.12] * 768
     
     search_body = {

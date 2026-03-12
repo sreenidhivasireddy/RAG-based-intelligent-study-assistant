@@ -2,6 +2,7 @@
 Search configuration management.
 Reads search-related configurations from environment variables.
 Supports multi-field indexing with Chinese and English analyzers.
+Uses Azure AI Search as the search backend.
 """
 
 import os
@@ -18,8 +19,10 @@ class SearchConfig:
     Supports multi-field search with separate Chinese and English field boosts.
     """
     
-    # ==================== Elasticsearch Configuration ====================
-    ES_INDEX_NAME: str = os.getenv("ES_INDEX_NAME", "knowledge_base")
+    # ==================== Azure AI Search Configuration ====================
+    AZURE_SEARCH_INDEX: str = os.getenv("AZURE_SEARCH_INDEX", "rag-index")
+    # Keep legacy name for compatibility
+    ES_INDEX_NAME: str = AZURE_SEARCH_INDEX
     
     # ==================== Hybrid Search Weights (KNN vs BM25) ====================
     KNN_WEIGHT: float = float(os.getenv("SEARCH_KNN_WEIGHT", "0.5"))

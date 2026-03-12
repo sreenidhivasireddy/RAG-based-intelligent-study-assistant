@@ -4,23 +4,29 @@ import numpy as np
 
 @dataclass
 class EsDocument:
-    """Elasticsearch document entity class"""
+    """Azure Search document entity class (formerly Elasticsearch)"""
     id: str
     file_md5: str
-    chunk_id: int
-    text_content: str
-    vector: List[float]  # or np.ndarray
-    model_version: str
+    chunk_id: str
+    content: str  # matches Azure schema
+    embedding: List[float]  # matches Azure schema (formerly 'vector')
+    file_name: str = None  # optional, for Azure schema
+    chunk_index: int = None  # optional, for Azure schema
     
     def to_dict(self):
-        """Convert to dictionary for Elasticsearch storage"""
-        return {
+        """Convert to dictionary for Azure Search storage"""
+        doc = {
+            'id': self.id,
             'file_md5': self.file_md5,
             'chunk_id': self.chunk_id,
-            'text_content': self.text_content,
-            'vector': self.vector,
-            'model_version': self.model_version
+            'content': self.content,
+            'embedding': self.embedding,
         }
+        if self.file_name:
+            doc['file_name'] = self.file_name
+        if self.chunk_index is not None:
+            doc['chunk_index'] = self.chunk_index
+        return doc
 
     # Backwards-compatible alias used by ElasticsearchService
     def to_es_dict(self):

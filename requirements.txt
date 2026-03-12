@@ -11,13 +11,15 @@ alembic>=1.12.1
 mysql-connector-python>=8.2.0
 
 # ==================== Search & Storage ====================
-# Elasticsearch 9.x compatible
-# NOTE: IK Analysis plugin required for Chinese tokenization
-# Install: ./elasticsearch-9.2.0/bin/elasticsearch-plugin install \
-#   https://github.com/infinilabs/analysis-ik/releases/download/v9.2.0/elasticsearch-analysis-ik-9.2.0.zip
-elasticsearch>=8.11.0
+# Azure AI Search
+azure-search-documents>=11.4.0
+azure-core>=1.26.0
+
+# Azure Blob Storage
+azure-storage-blob>=12.19.0
+
+# Storage and caching
 redis>=5.0.1
-minio>=7.2.0
 
 # ==================== Message Queue ====================
 kafka-python>=2.0.2
@@ -29,11 +31,8 @@ google-generativeai==0.3.1
 jieba>=0.42.1
 spacy>=3.7.2
 python-dotenv>=1.0.0
-mysql-connector-python>=8.2.0
 requests>=2.31.0
 openai>=1.0.0
-jieba==0.42.1
-spacy==3.7.2
 nltk==3.8.1
 numpy>=1.24.0
 
@@ -46,7 +45,12 @@ python-jose[cryptography]>=3.3.0
 passlib[bcrypt]>=1.7.4
 
 # ==================== Utilities ====================
-python-dotenv>=1.0.0
-requests>=2.31.0
-psutil>=5.9.0
 websockets>=12.0
+
+# ==================== Optional RAG Evaluation ====================
+# Azure AI Evaluation SDK (LLM-as-judge)
+azure-ai-evaluation>=1.0.0
+
+# Optional alternative evaluation stack
+# ragas>=0.1.12
+# datasets>=2.19.0

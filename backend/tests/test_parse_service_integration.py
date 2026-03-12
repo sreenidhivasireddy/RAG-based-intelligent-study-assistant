@@ -85,20 +85,20 @@ def test_parse_and_save_text_file():
     try:
         # Create test text file content
         test_content = """
-            人工智能简介
+            Introduction to Artificial Intelligence
 
-            人工智能（Artificial Intelligence，AI）是计算机科学的一个分支。
-            它试图了解智能的实质，并生产出一种新的能以人类智能相似的方式做出反应的智能机器。
+            Artificial intelligence (AI) is a branch of computer science.
+            It aims to understand intelligence and build systems that respond in ways similar to humans.
 
-            机器学习基础
+            Machine Learning Basics
 
-            机器学习是人工智能的核心。它使计算机能够从数据中学习。
-            深度学习是机器学习的一个分支。神经网络是深度学习的基础。
+            Machine learning is a core part of AI. It allows computers to learn from data.
+            Deep learning is a branch of machine learning. Neural networks are its foundation.
 
-            应用场景
+            Application Scenarios
 
-            该领域的研究包括机器人、语言识别、图像识别、自然语言处理和专家系统等。
-            现代AI技术已经广泛应用于各个行业。
+            This field includes robotics, speech recognition, image recognition, natural language processing, and expert systems.
+            Modern AI technology is widely used across many industries.
         """
         
         # Calculate MD5
@@ -162,7 +162,7 @@ def test_parse_and_save_with_different_chunk_sizes():
     db = SessionLocal()
     
     try:
-        test_content = "这是一个测试句子。" * 50  # 500 characters
+        test_content = "This is a test sentence. " * 50  # 500 characters
         
         results = []
         
@@ -216,8 +216,8 @@ def test_parse_and_save_large_content():
         # Create a large text (simulate a real document)
         large_content = ""
         for i in range(100):
-            large_content += f"\n\n段落 {i+1}\n\n"
-            large_content += f"这是第{i+1}个段落的内容。" * 20
+            large_content += f"\n\nParagraph {i+1}\n\n"
+            large_content += f"This is the content of paragraph {i+1}. " * 20
         
         file_md5 = hashlib.md5(large_content.encode()).hexdigest()
         
@@ -269,7 +269,7 @@ def test_query_and_cleanup():
     
     try:
         # Create test data
-        test_content = "测试内容 " * 10
+        test_content = "test content " * 10
         file_md5 = hashlib.md5(test_content.encode()).hexdigest()
         
         # Track for cleanup
